@@ -1,4 +1,5 @@
 import discord
+import os
 from discord.ext import commands
 from discord.utils import get
 
@@ -222,4 +223,4 @@ async def on_command_error(ctx, error):
 # BOT TOKEN
 # =========================
 
-bot.run("MTUwOTU1Njk0NzAzNTIzMDI2MA.G7WWY2.1t4ec-Y_bggyeYK6fC9NA3RoO2mxnU0SUREFUo")
+bot.run(os.getenv("MTUwOTU1Njk0NzAzNTIzMDI2MA.G7WWY2.1t4ec-Y_bggyeYK6fC9NA3RoO2mxnU0SUREFUo"))
