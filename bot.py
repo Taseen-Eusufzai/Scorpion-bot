@@ -64,19 +64,15 @@ async def ms(ctx):
 async def helpme(ctx):
     embed = discord.Embed(
         title="🦂 Scorpion Bot Commands",
-        description="This bot is made by Kaizen",
+        description="**Developer:** Kaizen\n**Prefix:** `,`\n\n*Note: All moderation commands require a reason and cannot target staff members.*",
         color=discord.Color.red()
     )
 
-    embed.add_field(name=",ping / ,ms", value="Show bot ping and latency", inline=False)
-    embed.add_field(name=",warn @user <reason>", value="Warn a member (Reason required)", inline=False)
-    embed.add_field(name=",mute @user <reason>", value="Mute a member (Reason required)", inline=False)
-    embed.add_field(name=",unmute @user <reason>", value="Unmute a member (Reason required)", inline=False)
-    embed.add_field(name=",jail USER_ID <reason>", value="Jail user using ID only (Reason required)", inline=False)
-    embed.add_field(name=",unjail USER_ID <reason>", value="Unjail user using ID only (Reason required)", inline=False)
-    embed.add_field(name=",clear amount", value="Delete messages (Max 100)", inline=False)
-    embed.add_field(name=",loa <duration> <reason>", value="Log LOA & get the LOA role", inline=False)
-    embed.add_field(name=",return", value="Remove LOA role and return to duty", inline=False)
+    embed.add_field(name="⚙ Utility", value="`,ping` • Show bot ping\n`,ms` • Quick connection check", inline=False)
+    embed.add_field(name="🛡 Moderation", value="`,warn @user <reason>` • Warn a member\n`,mute @user <reason>` • Mute a member\n`,unmute @user <reason>` • Unmute a member", inline=False)
+    embed.add_field(name="🚔 Deep Freeze", value="`,jail USER_ID <reason>` • Jail user via ID\n`,unjail USER_ID <reason>` • Unjail user via ID", inline=False)
+    embed.add_field(name="🧹 Chat Management", value="`,clear <amount>` • Delete messages (Max 100)", inline=False)
+    embed.add_field(name="📅 Staff Logistics", value="`,loa <duration> <reason>` • Log absence & get LOA role\n`,return` • Remove LOA role & return to duty", inline=False)
 
     await ctx.send(embed=embed)
 
