@@ -19,6 +19,9 @@ STATS_FILE = "stats.json"
 JAIL_LOG_CHANNEL_NAME = "✎ᝰjail-logs"
 PUNISHMENT_LOG_CHANNEL_NAME = "✎ᝰmembers-punishment"
 
+# Internal memory storage for deleted messages mapping: {channel_id: [list of deleted messages]}
+deleted_messages_cache = {}
+
 def load_stats():
     """Loads stats, warnings history, active mutes, and LOA data from the JSON file."""
     if os.path.exists(STATS_FILE):
@@ -160,6 +163,42 @@ def has_loa_permissions():
         await ctx.send("❌ You do not hold an authorized hierarchy role to manage an LOA.")
         return False
     return commands.check(predicate)
+
+def has_clear_snipe_permissions():
+    """Restricts command usage to Administrator, Co-Owner, or Owner roles."""
+    async def predicate(ctx):
+        allowed_roles = ["Administrator", "Co-Owner", "Owner"]
+        if any(role.name in allowed_roles for role in ctx.author.roles):
+            return True
+        await ctx.send("❌ You do not have the required role hierarchy to clear logs.")
+        return False
+    return commands.check(predicate)
+
+# =========================
+# DELETED MESSAGE SNIPER LOGIC
+# =========================
+
+@bot.event
+async def on_message_delete(message):
+    """Intercepts and buffers deleted messages into application cache memory."""
+    if message.author.bot:
+        return
+        
+    channel_id = message.channel.id
+    if channel_id not in deleted_messages_cache:
+        deleted_messages_cache[channel_id] = []
+        
+    log_entry = {
+        "author": message.author,
+        "content": message.content or "[No text content/Attachment Only]",
+        "timestamp": datetime.utcnow().strftime("%H:%M:%S")
+    }
+    
+    deleted_messages_cache[channel_id].append(log_entry)
+    
+    # Cap memory cache limit per channel to the last 10 entries to stay light
+    if len(deleted_messages_cache[channel_id]) > 10:
+        deleted_messages_cache[channel_id].pop(0)
 
 # =========================
 # INTERACTIVE BUTTONS VIEW
@@ -377,6 +416,52 @@ async def ping(ctx):
     await ctx.send(f"🏓 Pong! {round(bot.latency * 1000)}ms")
 
 # =========================
+# SNIPE (SEE DELETED) COMMAND
+# =========================
+
+@bot.command(name="s")
+@is_staff()
+async def see_deleted(ctx):
+    """Shows logging record history of deleted contents in the running channel."""
+    channel_id = ctx.channel.id
+    history = deleted_messages_cache.get(channel_id, [])
+
+    if not history:
+        await ctx.send("✨ No deleted messages recorded in this channel history.")
+        return
+
+    embed = discord.Embed(
+        title=f"🕵️ Channel Snipe Logs",
+        description=f"Displaying the latest deleted messages in {ctx.channel.mention}:",
+        color=discord.Color.blue()
+    )
+
+    # List entries from newest to oldest
+    for idx, msg in enumerate(reversed(history), start=1):
+        embed.add_field(
+            name=f"Log #{idx} | Sent by {msg['author'].name} at {msg['timestamp']}",
+            value=f"**Message:** {msg['content']}",
+            inline=False
+        )
+
+    await ctx.send(embed=embed)
+
+# =========================
+# CLEAR SNIPE HISTORIES COMMAND
+# =========================
+
+@bot.command(name="cs")
+@has_clear_snipe_permissions()
+async def clear_snipe(ctx):
+    """Wipes the buffered logging cache record for the running channel clean."""
+    channel_id = ctx.channel.id
+    
+    if channel_id in deleted_messages_cache:
+        deleted_messages_cache[channel_id] = []
+        
+    await ctx.send(f"🧹 Snipe history for {ctx.channel.mention} has been cleared completely.")
+
+# =========================
 # MODERATOR STATISTICS (MS) COMMAND
 # =========================
 
@@ -447,7 +532,7 @@ async def helpme(ctx):
     embed.add_field(name="⚙ Utility", value="`,ping` • Show bot ping\n`,ms [@staff/ID]` • View moderator metrics (Staff Only)", inline=False)
     embed.add_field(name="🛡 Moderation", value="`,warn [@user/ID] <reason>` • Warn a member\n`,warnings [@user/ID]` • View a user's warning history & manage logs (Staff Only)\n`,mute [@user/ID] <duration> <reason>` • Mute a member for a duration\n`,unmute [@user/ID] <reason>` • Unmute a member", inline=False)
     embed.add_field(name="🚔 Deep Freeze", value="`,jail [@user/ID] <reason>` • Jail user\n`,unjail [@user/ID] <reason>` • Unjail user", inline=False)
-    embed.add_field(name="🧹 Chat Management", value="`,clear <amount>` • Delete messages (Max 100) (Staff Only)", inline=False)
+    embed.add_field(name="🧹 Chat Management", value="`,clear <amount>` • Delete messages (Max 100) (Staff Only)\n`,s` • View recently deleted channel items (Staff Only)\n`,cs` • Clear deleted item memory database (Admin+ Only)", inline=False)
     embed.add_field(name="📅 Staff Logistics", value="`,loa [@user/ID] <duration> <reason>` • Log absence (Elite Roles Only)\n`,return [@user/ID]` • Remove LOA status from a user", inline=False)
 
     await ctx.send(embed=embed)
