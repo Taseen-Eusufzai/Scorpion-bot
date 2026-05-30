@@ -106,7 +106,6 @@ def is_target_staff():
     async def predicate(ctx):
         args = ctx.message.content.split()
         if len(args) > 1:
-            # Handles both IDs and Mentions safely in the pre-check
             converter = commands.UserConverter()
             try:
                 user = await converter.convert(ctx, args[1])
@@ -379,10 +378,12 @@ async def jail(ctx, user: discord.User, *, reason: str):
         return
 
     log_action(ctx.author.id, "jails")
-    jailed_role = get(ctx.guild.roles, name="Jailed")
+    
+    # Strictly looks for the exact "⚠️Jailed" role layout now
+    jailed_role = get(ctx.guild.roles, name="⚠️Jailed")
 
     if jailed_role is None:
-        jailed_role = await ctx.guild.create_role(name="Jailed")
+        jailed_role = await ctx.guild.create_role(name="⚠️Jailed")
         for channel in ctx.guild.channels:
             await channel.set_permissions(jailed_role, send_messages=False, speak=False)
 
@@ -414,9 +415,9 @@ async def unjail(ctx, user: discord.User, *, reason: str):
         await ctx.send("❌ User not found in this server.")
         return
 
-    jailed_role = get(ctx.guild.roles, name="Jailed")
+    jailed_role = get(ctx.guild.roles, name="⚠️Jailed")
 
-    if jailed_role in member.roles:
+    if jailed_role and jailed_role in member.roles:
         await member.remove_roles(jailed_role)
 
     embed = discord.Embed(
@@ -462,7 +463,6 @@ async def loa(ctx, user: discord.User, duration: str, *, reason: str):
         await ctx.send("❌ Invalid duration layout! Use values like `10m`, `3h`, `5d`, or `2w` (no spaces).")
         return
 
-    # Check if they are actually in the guild right now to apply the role
     member = ctx.guild.get_member(user.id)
     if member:
         loa_role = get(ctx.guild.roles, name="LOA")
