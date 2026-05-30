@@ -159,6 +159,114 @@ def has_loa_permissions():
     return commands.check(predicate)
 
 # =========================
+# INTERACTIVE BUTTONS VIEW
+# =========================
+
+class WarningManagementView(discord.ui.View):
+    """Adds action buttons directly below the warning history layout."""
+    def __init__(self, target_user: discord.User):
+        super().__init__(timeout=None)  # Keeps buttons active permanently or until bot reboot
+        self.target_user = target_user
+
+    async def interaction_check(self, interaction: discord.Interaction) -> bool:
+        # Security Guard: Ensure clicking user belongs to the 🛡️Staff Team
+        if any(role.name == "🛡️Staff Team" for role in interaction.user.roles):
+            return True
+        await interaction.response.send_message("❌ Only members of the Staff team can perform actions on infractions.", ephemeral=True)
+        return False
+
+    @discord.ui.button(label="Clear Most Recent Warning", style=discord.ButtonStyle.secondary, emoji="🗑️")
+    async def clear_recent(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = load_stats()
+        user_key = str(self.target_user.id)
+        history = data.get("user_warnings", {}).get(user_key, [])
+
+        if not history:
+            await interaction.response.send_message("❌ This user has no warning history to alter.", ephemeral=True)
+            return
+
+        removed_entry = history.pop()  # Removes the last element added
+        data["user_warnings"][user_key] = history
+        save_stats(data)
+
+        # Update the initial embed on screen
+        updated_embed = create_warnings_embed(self.target_user, history)
+        
+        # Disable buttons entirely if record is now completely clean
+        if not history:
+            for child in self.children:
+                child.disabled = True
+
+        await interaction.response.edit_message(embed=updated_embed, view=self)
+        await interaction.followup.send(f"✅ Most recent warning for {self.target_user.mention} has been deleted.", ephemeral=True)
+
+        # Route audit details to logistics channel
+        log_channel = get(interaction.guild.text_channels, name=PUNISHMENT_LOG_CHANNEL_NAME)
+        if log_channel:
+            log_embed = discord.Embed(
+                title="🗑️ Single Warning Revoked",
+                description=f"**Target:** {self.target_user.mention} (`{self.target_user.id}`)\n**Staff Executer:** {interaction.user.mention}\n**Removed Action Reason:** {removed_entry['reason']}",
+                color=discord.Color.green(),
+                timestamp=datetime.utcnow()
+            )
+            await log_channel.send(embed=log_embed)
+
+    @discord.ui.button(label="Clear All Warnings", style=discord.ButtonStyle.danger, emoji="💥")
+    async def clear_all(self, interaction: discord.Interaction, button: discord.ui.Button):
+        data = load_stats()
+        user_key = str(self.target_user.id)
+        history = data.get("user_warnings", {}).get(user_key, [])
+
+        if not history:
+            await interaction.response.send_message("❌ This user has no warning history to alter.", ephemeral=True)
+            return
+
+        total_cleared = len(history)
+        data["user_warnings"][user_key] = []
+        save_stats(data)
+
+        updated_embed = create_warnings_embed(self.target_user, [])
+        
+        # Wipe buttons out since no records remain
+        for child in self.children:
+            child.disabled = True
+
+        await interaction.response.edit_message(embed=updated_embed, view=self)
+        await interaction.followup.send(f"✅ All `{total_cleared}` warnings for {self.target_user.mention} have been wiped clean.", ephemeral=True)
+
+        log_channel = get(interaction.guild.text_channels, name=PUNISHMENT_LOG_CHANNEL_NAME)
+        if log_channel:
+            log_embed = discord.Embed(
+                title="💥 Entire Warning File Wiped",
+                description=f"**Target:** {self.target_user.mention} (`{self.target_user.id}`)\n**Staff Executer:** {interaction.user.mention}\n**Action Details:** Wiped profile cleanly. (Purged `{total_cleared}` warnings)",
+                color=discord.Color.red(),
+                timestamp=datetime.utcnow()
+            )
+            await log_channel.send(embed=log_embed)
+
+
+def create_warnings_embed(user: discord.User, history: list) -> discord.Embed:
+    """Helper method to draw the Infraction Embed uniformly."""
+    embed = discord.Embed(
+        title=f"📋 Infraction History",
+        description=f"Showing recorded warning profile data for {user.mention} (`{user.id}`)",
+        color=discord.Color.orange()
+    )
+    embed.set_thumbnail(url=user.display_avatar.url)
+
+    if not history:
+        embed.add_field(name="Status", value="✨ Clean record! No warning infractions found on file.", inline=False)
+    else:
+        embed.add_field(name="Total Warnings Active", value=f"📊 `{len(history)}` warnings logged.", inline=False)
+        for index, item in enumerate(history, start=1):
+            embed.add_field(
+                name=f"Case #{index} — {item['date']}",
+                value=f"**Reason:** {item['reason']}\n**Moderator:** <@{item['mod_id']}>",
+                inline=False
+            )
+    return embed
+
+# =========================
 # BACKGROUND AUTOMATION TRACKERS
 # =========================
 
@@ -341,7 +449,7 @@ async def helpme(ctx):
     )
 
     embed.add_field(name="⚙ Utility", value="`,ping` • Show bot ping\n`,ms [@staff/ID]` • View moderator metrics (Staff Only)", inline=False)
-    embed.add_field(name="🛡 Moderation", value="`,warn [@user/ID] <reason>` • Warn a member\n`,warnings [@user/ID]` • View a user's warning history (Staff Only)\n`,mute [@user/ID] <duration> <reason>` • Mute a member for a duration\n`,unmute [@user/ID] <reason>` • Unmute a member", inline=False)
+    embed.add_field(name="🛡 Moderation", value="`,warn [@user/ID] <reason>` • Warn a member\n`,warnings [@user/ID]` • View a user's warning history & manage logs (Staff Only)\n`,mute [@user/ID] <duration> <reason>` • Mute a member for a duration\n`,unmute [@user/ID] <reason>` • Unmute a member", inline=False)
     embed.add_field(name="🚔 Deep Freeze", value="`,jail [@user/ID] <reason>` • Jail user\n`,unjail [@user/ID] <reason>` • Unjail user", inline=False)
     embed.add_field(name="🧹 Chat Management", value="`,clear <amount>` • Delete messages (Max 100) (Staff Only)", inline=False)
     embed.add_field(name="📅 Staff Logistics", value="`,loa [@user/ID] <duration> <reason>` • Log absence (Elite Roles Only)\n`,return [@user/ID]` • Remove LOA status from a user", inline=False)
@@ -385,40 +493,26 @@ async def warn(ctx, user: discord.User, *, reason: str):
         await ctx.send(f"⚠ Warning: Could not find log routing channel `#{PUNISHMENT_LOG_CHANNEL_NAME}`.")
 
 # =========================
-# CHECK WARNINGS COMMAND
+# CHECK WARNINGS COMMAND (WITH INTERACTIVE BUTTONS View)
 # =========================
 
 @bot.command(name="warnings")
 @is_staff()
 async def check_warnings(ctx, user: discord.User):
-    """Retrieves full warning logs history for a specified user or ID."""
+    """Retrieves full warning logs history and attaches management buttons below."""
     data = load_stats()
     user_key = str(user.id)
     history = data.get("user_warnings", {}).get(user_key, [])
 
-    embed = discord.Embed(
-        title=f"📋 Infraction History",
-        description=f"Showing recorded warning profile data for {user.mention} (`{user.id}`)",
-        color=discord.Color.orange()
-    )
-    embed.set_thumbnail(url=user.display_avatar.url)
+    embed = create_warnings_embed(user, history)
+    view = WarningManagementView(user)
 
+    # If user record is clean from the start, grey out the interaction buttons
     if not history:
-        embed.add_field(name="Status", value="✨ Clean record! No warning infractions found on file.", inline=False)
-    else:
-        embed.add_field(name="Total Warnings Active", value=f"📊 `{len(history)}` warnings logged.", inline=False)
-        
-        for index, item in enumerate(history[-10:], start=1):
-            embed.add_field(
-                name=f"Case #{index} — {item['date']}",
-                value=f"**Reason:** {item['reason']}\n**Moderator:** <@{item['mod_id']}>",
-                inline=False
-            )
-            
-        if len(history) > 10:
-            embed.set_footer(text="Showing the 10 most recent records only.")
+        for child in view.children:
+            child.disabled = True
 
-    await ctx.send(embed=embed)
+    await ctx.send(embed=embed, view=view)
 
 # =========================
 # MUTE COMMAND
@@ -627,7 +721,7 @@ async def unjail(ctx, user: discord.User, *, reason: str):
 # =========================
 
 @bot.command()
-@is_staff()  # Explicitly requires the "🛡️Staff Team" role to use clear
+@is_staff()  
 async def clear(ctx, amount: int):
 
     if amount > 100:
