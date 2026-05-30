@@ -140,7 +140,7 @@ def is_target_staff():
     return commands.check(predicate)
 
 def is_staff():
-    """Custom check to ensure only members with the '🛡️Staff Team' role can view stats or histories."""
+    """Custom check to ensure only members with the '🛡️Staff Team' role can access tracking commands."""
     async def predicate(ctx):
         if any(role.name == "🛡️Staff Team" for role in ctx.author.roles):
             return True
@@ -229,7 +229,6 @@ async def check_expired_mutes():
                         try:
                             await member.remove_roles(muted_role)
                             
-                            # Log expiration to punishment channel
                             log_channel = get(guild.text_channels, name=PUNISHMENT_LOG_CHANNEL_NAME)
                             if log_channel:
                                 log_embed = discord.Embed(
@@ -344,7 +343,7 @@ async def helpme(ctx):
     embed.add_field(name="⚙ Utility", value="`,ping` • Show bot ping\n`,ms [@staff/ID]` • View moderator metrics (Staff Only)", inline=False)
     embed.add_field(name="🛡 Moderation", value="`,warn [@user/ID] <reason>` • Warn a member\n`,warnings [@user/ID]` • View a user's warning history (Staff Only)\n`,mute [@user/ID] <duration> <reason>` • Mute a member for a duration\n`,unmute [@user/ID] <reason>` • Unmute a member", inline=False)
     embed.add_field(name="🚔 Deep Freeze", value="`,jail [@user/ID] <reason>` • Jail user\n`,unjail [@user/ID] <reason>` • Unjail user", inline=False)
-    embed.add_field(name="🧹 Chat Management", value="`,clear <amount>` • Delete messages (Max 100)", inline=False)
+    embed.add_field(name="🧹 Chat Management", value="`,clear <amount>` • Delete messages (Max 100) (Staff Only)", inline=False)
     embed.add_field(name="📅 Staff Logistics", value="`,loa [@user/ID] <duration> <reason>` • Log absence (Elite Roles Only)\n`,return [@user/ID]` • Remove LOA status from a user", inline=False)
 
     await ctx.send(embed=embed)
@@ -354,7 +353,7 @@ async def helpme(ctx):
 # =========================
 
 @bot.command()
-@commands.has_permissions(manage_messages=True)
+@is_staff()
 @is_target_staff()
 async def warn(ctx, user: discord.User, *, reason: str):
     
@@ -371,7 +370,6 @@ async def warn(ctx, user: discord.User, *, reason: str):
 
     await ctx.send(embed=embed)
 
-    # Logging to "✎ᝰmembers-punishment"
     log_channel = get(ctx.guild.text_channels, name=PUNISHMENT_LOG_CHANNEL_NAME)
     if log_channel:
         log_embed = discord.Embed(
@@ -427,7 +425,7 @@ async def check_warnings(ctx, user: discord.User):
 # =========================
 
 @bot.command()
-@commands.has_permissions(manage_roles=True)
+@is_staff()
 @is_target_staff()
 async def mute(ctx, user: discord.User, duration: str, *, reason: str):
 
@@ -451,7 +449,6 @@ async def mute(ctx, user: discord.User, duration: str, *, reason: str):
 
     await member.add_roles(muted_role)
 
-    # Save active expiration details to data
     expiry_time = datetime.utcnow() + time_delta
     data = load_stats()
     data["active_mutes"][str(user.id)] = expiry_time.strftime("%Y-%m-%d %H:%M:%S")
@@ -488,7 +485,7 @@ async def mute(ctx, user: discord.User, duration: str, *, reason: str):
 # =========================
 
 @bot.command()
-@commands.has_permissions(manage_roles=True)
+@is_staff()
 @is_target_staff()
 async def unmute(ctx, user: discord.User, *, reason: str):
 
@@ -502,7 +499,6 @@ async def unmute(ctx, user: discord.User, *, reason: str):
     if muted_role in member.roles:
         await member.remove_roles(muted_role)
 
-    # Clear from tracking storage if manually unmuted early
     data = load_stats()
     if str(user.id) in data["active_mutes"]:
         del data["active_mutes"][str(user.id)]
@@ -537,7 +533,7 @@ async def unmute(ctx, user: discord.User, *, reason: str):
 # =========================
 
 @bot.command()
-@commands.has_permissions(manage_roles=True)
+@is_staff()
 @is_target_staff()
 async def jail(ctx, user: discord.User, *, reason: str):
 
@@ -587,7 +583,7 @@ async def jail(ctx, user: discord.User, *, reason: str):
 # =========================
 
 @bot.command()
-@commands.has_permissions(manage_roles=True)
+@is_staff()
 @is_target_staff()
 async def unjail(ctx, user: discord.User, *, reason: str):
 
@@ -631,7 +627,7 @@ async def unjail(ctx, user: discord.User, *, reason: str):
 # =========================
 
 @bot.command()
-@commands.has_permissions(manage_messages=True)
+@is_staff()  # Explicitly requires the "🛡️Staff Team" role to use clear
 async def clear(ctx, amount: int):
 
     if amount > 100:
