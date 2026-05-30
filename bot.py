@@ -1,10 +1,12 @@
 import os
+import json
 import discord
 from discord.ext import commands
 from discord.utils import get
+from datetime import datetime
 
 # =========================
-# BOT SETUP
+# BOT SETUP & DATA STORAGE
 # =========================
 
 intents = discord.Intents.default()
@@ -12,6 +14,64 @@ intents.message_content = True
 intents.members = True
 
 bot = commands.Bot(command_prefix=",", intents=intents)
+
+STATS_FILE = "stats.json"
+
+def load_stats():
+    """Loads stats from the JSON file or creates a empty structure if it doesn't exist."""
+    if os.path.exists(STATS_FILE):
+        try:
+            with open(STATS_FILE, "r") as f:
+                return json.load(f)
+        except:
+            return {}
+    return {}
+
+def save_stats(data):
+    """Saves the tracking data back to the JSON file."""
+    with open(STATS_FILE, "w") as f:
+        json.dump(data, f, indent=4)
+
+def log_action(mod_id, action_type):
+    """Increments daily, weekly, monthly, and total logs for a specific mod."""
+    stats = load_stats()
+    mod_key = str(mod_id)
+    current_date = datetime.utcnow()
+    
+    # Structure data if the mod is new
+    if mod_key not in stats:
+        stats[mod_key] = {
+            "warns": {"daily": 0, "weekly": 0, "monthly": 0, "total": 0},
+            "mutes": {"daily": 0, "weekly": 0, "monthly": 0, "total": 0},
+            "jails": {"daily": 0, "weekly": 0, "monthly": 0, "total": 0},
+            "last_update": current_date.strftime("%Y-%m-%d")
+        }
+
+    mod_data = stats[mod_key]
+    last_update_str = mod_data.get("last_update", current_date.strftime("%Y-%m-%d"))
+    last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
+
+    # Time differences to handle automatic resets
+    days_diff = (current_date - last_update).days
+    is_new_day = days_diff >= 1
+    is_new_week = current_date.strftime("%V") != last_update.strftime("%V") or days_diff >= 7
+    is_new_month = current_date.month != last_update.month or days_diff >= 30
+
+    # Reset periods if time has passed
+    for cat in ["warns", "mutes", "jails"]:
+        if is_new_day: mod_data[cat]["daily"] = 0
+        if is_new_week: mod_data[cat]["weekly"] = 0
+        if is_new_month: mod_data[cat]["monthly"] = 0
+
+    # Add the current log action
+    if action_type in ["warns", "mutes", "jails"]:
+        mod_data[action_type]["daily"] += 1
+        mod_data[action_type]["weekly"] += 1
+        mod_data[action_type]["monthly"] += 1
+        mod_data[action_type]["total"] += 1
+
+    mod_data["last_update"] = current_date.strftime("%Y-%m-%d")
+    save_stats(stats)
 
 # =========================
 # HELPER CHECK (STAFF BYPASS PROTECTION)
@@ -45,16 +105,69 @@ async def on_ready():
     )
 
 # =========================
-# PING / MS COMMANDS
+# PING COMMAND
 # =========================
 
 @bot.command()
 async def ping(ctx):
     await ctx.send(f"🏓 Pong! {round(bot.latency * 1000)}ms")
 
+# =========================
+# MODERATOR STATISTICS (MS) COMMAND
+# =========================
+
 @bot.command()
-async def ms(ctx):
-    await ctx.send(f"⚡ Connection Speed: `{round(bot.latency * 1000)}ms`")
+async def ms(ctx, member: discord.Member = None):
+    """Displays moderation action metrics for a specific staff member or yourself."""
+    target = member or ctx.author
+    stats = load_stats()
+    mod_key = str(target.id)
+
+    if mod_key not in stats:
+        # Default empty display structure
+        mod_data = {
+            "warns": {"daily": 0, "weekly": 0, "monthly": 0, "total": 0},
+            "mutes": {"daily": 0, "weekly": 0, "monthly": 0, "total": 0},
+            "jails": {"daily": 0, "weekly": 0, "monthly": 0, "total": 0}
+        }
+    else:
+        mod_data = stats[mod_key]
+
+    # Calculate Total Actions Accumulations
+    daily_total = mod_data["warns"]["daily"] + mod_data["mutes"]["daily"] + mod_data["jails"]["daily"]
+    weekly_total = mod_data["warns"]["weekly"] + mod_data["mutes"]["weekly"] + mod_data["jails"]["weekly"]
+    monthly_total = mod_data["warns"]["monthly"] + mod_data["mutes"]["monthly"] + mod_data["jails"]["monthly"]
+    all_time_total = mod_data["warns"]["total"] + mod_data["mutes"]["total"] + mod_data["jails"]["total"]
+
+    embed = discord.Embed(
+        title="Moderation Statistics",
+        color=discord.Color.from_rgb(47, 49, 54) # Sleek Dark Discord theme palette
+    )
+    embed.set_author(name=target.display_name, icon_url=target.display_avatar.url)
+
+    embed.add_field(
+        name="Warns",
+        value=f"Daily: {mod_data['warns']['daily']} | Weekly: {mod_data['warns']['weekly']} | Monthly: {mod_data['warns']['monthly']} | Total: {mod_data['warns']['total']}",
+        inline=False
+    )
+    embed.add_field(
+        name="Mutes",
+        value=f"Daily: {mod_data['mutes']['daily']} | Weekly: {mod_data['mutes']['weekly']} | Monthly: {mod_data['mutes']['monthly']} | Total: {mod_data['mutes']['total']}",
+        inline=False
+    )
+    embed.add_field(
+        name="Jails",
+        value=f"Daily: {mod_data['jails']['daily']} | Weekly: {mod_data['jails']['weekly']} | Monthly: {mod_data['jails']['monthly']} | Total: {mod_data['jails']['total']}",
+        inline=False
+    )
+    embed.add_field(
+        name="Total Actions",
+        value=f"Daily: {daily_total}\nWeekly: {weekly_total}\nMonthly: {monthly_total}\nAll-time: {all_time_total}",
+        inline=False
+    )
+    embed.set_footer(text=f"Built by Kaizen | Today at {datetime.utcnow().strftime('%H:%M')}")
+
+    await ctx.send(embed=embed)
 
 # =========================
 # HELP COMMAND
@@ -68,7 +181,7 @@ async def helpme(ctx):
         color=discord.Color.red()
     )
 
-    embed.add_field(name="⚙ Utility", value="`,ping` • Show bot ping\n`,ms` • Quick connection check", inline=False)
+    embed.add_field(name="⚙ Utility", value="`,ping` • Show bot ping\n`,ms [@staff]` • View moderator metrics", inline=False)
     embed.add_field(name="🛡 Moderation", value="`,warn @user <reason>` • Warn a member\n`,mute @user <reason>` • Mute a member\n`,unmute @user <reason>` • Unmute a member", inline=False)
     embed.add_field(name="🚔 Deep Freeze", value="`,jail USER_ID <reason>` • Jail user via ID\n`,unjail USER_ID <reason>` • Unjail user via ID", inline=False)
     embed.add_field(name="🧹 Chat Management", value="`,clear <amount>` • Delete messages (Max 100)", inline=False)
@@ -84,13 +197,14 @@ async def helpme(ctx):
 @commands.has_permissions(manage_messages=True)
 @is_target_staff()
 async def warn(ctx, member: discord.Member, *, reason: str):
+    
+    log_action(ctx.author.id, "warns") # Tracker trigger
 
     embed = discord.Embed(
         title="⚠ Warning",
         description=f"{member.mention} has been warned.",
         color=discord.Color.orange()
     )
-
     embed.add_field(name="Reason", value=reason, inline=False)
     embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
 
@@ -104,6 +218,8 @@ async def warn(ctx, member: discord.Member, *, reason: str):
 @commands.has_permissions(manage_roles=True)
 @is_target_staff()
 async def mute(ctx, member: discord.Member, *, reason: str):
+
+    log_action(ctx.author.id, "mutes") # Tracker trigger
 
     muted_role = get(ctx.guild.roles, name="Muted")
 
@@ -170,6 +286,8 @@ async def jail(ctx, user_id: int, *, reason: str):
     if any(role.name == "Staff" for role in member.roles):
         await ctx.send("❌ You cannot punish a member of the Staff team!")
         return
+
+    log_action(ctx.author.id, "jails") # Tracker trigger
 
     jailed_role = get(ctx.guild.roles, name="Jailed")
 
@@ -251,7 +369,6 @@ async def clear(ctx, amount: int):
 
 @bot.command()
 async def loa(ctx, duration: str, *, reason: str):
-    """Logs a staff Leave of Absence and assigns the LOA role."""
     
     loa_role = get(ctx.guild.roles, name="LOA")
     if loa_role is None:
@@ -277,7 +394,6 @@ async def loa(ctx, duration: str, *, reason: str):
 
 @bot.command(name="return")
 async def return_staff(ctx):
-    """Allows staff to end their LOA and removes the LOA role."""
     
     loa_role = get(ctx.guild.roles, name="LOA")
     
@@ -314,6 +430,6 @@ async def on_command_error(ctx, error):
 # =========================
 # BOT TOKEN
 # =========================
-bot.run(os.getenv('DISCORD_TOKEN'))
 
+bot.run(os.getenv('DISCORD_BOT_TOKEN'))
 
