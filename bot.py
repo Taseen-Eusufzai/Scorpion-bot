@@ -20,10 +20,8 @@ bot = commands.Bot(command_prefix=",", intents=intents)
 def is_target_staff():
     """Custom check to ensure the target member does not have the 'Staff' role."""
     async def predicate(ctx):
-        # We look at the first argument after the command to find the target member
         args = ctx.message.content.split()
         if len(args) > 1:
-            # Try to find the member by mention or ID
             converter = commands.MemberConverter()
             try:
                 member = await converter.convert(ctx, args[1])
@@ -56,7 +54,6 @@ async def ping(ctx):
 
 @bot.command()
 async def ms(ctx):
-    """Alternative fast latency command."""
     await ctx.send(f"⚡ Connection Speed: `{round(bot.latency * 1000)}ms`")
 
 # =========================
@@ -78,7 +75,8 @@ async def helpme(ctx):
     embed.add_field(name=",jail USER_ID <reason>", value="Jail user using ID only (Reason required)", inline=False)
     embed.add_field(name=",unjail USER_ID <reason>", value="Unjail user using ID only (Reason required)", inline=False)
     embed.add_field(name=",clear amount", value="Delete messages (Max 100)", inline=False)
-    embed.add_field(name=",loa <duration> <reason>", value="Log a staff Leave of Absence", inline=False)
+    embed.add_field(name=",loa <duration> <reason>", value="Log LOA & get the LOA role", inline=False)
+    embed.add_field(name=",return", value="Remove LOA role and return to duty", inline=False)
 
     await ctx.send(embed=embed)
 
@@ -89,7 +87,7 @@ async def helpme(ctx):
 @bot.command()
 @commands.has_permissions(manage_messages=True)
 @is_target_staff()
-async def warn(ctx, member: discord.Member, *, reason: str): # Removing default string makes it mandatory
+async def warn(ctx, member: discord.Member, *, reason: str):
 
     embed = discord.Embed(
         title="⚠ Warning",
@@ -173,7 +171,6 @@ async def jail(ctx, user_id: int, *, reason: str):
         await ctx.send("❌ User not found in this server.")
         return
 
-    # Check for staff manually here since ID is evaluated inside the command logic
     if any(role.name == "Staff" for role in member.roles):
         await ctx.send("❌ You cannot punish a member of the Staff team!")
         return
@@ -243,7 +240,6 @@ async def unjail(ctx, user_id: int, *, reason: str):
 @commands.has_permissions(manage_messages=True)
 async def clear(ctx, amount: int):
 
-    # Cap the amount at 100
     if amount > 100:
         await ctx.send("⚠ You can only delete up to 100 messages at a time.", delete_after=3)
         return
@@ -259,16 +255,48 @@ async def clear(ctx, amount: int):
 
 @bot.command()
 async def loa(ctx, duration: str, *, reason: str):
-    """Allows staff to request or state their Leave of Absence."""
+    """Logs a staff Leave of Absence and assigns the LOA role."""
+    
+    loa_role = get(ctx.guild.roles, name="LOA")
+    if loa_role is None:
+        loa_role = await ctx.guild.create_role(name="LOA", reason="Automated LOA role creation")
+
+    if loa_role not in ctx.author.roles:
+        await ctx.author.add_roles(loa_role)
+
     embed = discord.Embed(
         title="📅 Leave of Absence Logged",
-        description=f"Staff member {ctx.author.mention} has requested an LOA.",
+        description=f"Staff member {ctx.author.mention} is now on LOA.",
         color=discord.Color.blue()
     )
     embed.add_field(name="Duration", value=duration, inline=True)
     embed.add_field(name="Reason", value=reason, inline=False)
     embed.set_footer(text=f"Logged on {ctx.message.created_at.strftime('%Y-%m-%d')}")
 
+    await ctx.send(embed=embed)
+
+# =========================
+# RETURN COMMAND
+# =========================
+
+@bot.command(name="return")
+async def return_staff(ctx):
+    """Allows staff to end their LOA and removes the LOA role."""
+    
+    loa_role = get(ctx.guild.roles, name="LOA")
+    
+    if loa_role is None or loa_role not in ctx.author.roles:
+        await ctx.send("❌ You don't currently have the LOA role!", delete_after=3)
+        return
+
+    await ctx.author.remove_roles(loa_role)
+
+    embed = discord.Embed(
+        title="👋 Welcome Back!",
+        description=f"{ctx.author.mention} has returned from their Leave of Absence and their LOA role has been removed.",
+        color=discord.Color.green()
+    )
+    
     await ctx.send(embed=embed)
 
 # =========================
@@ -282,16 +310,13 @@ async def on_command_error(ctx, error):
         await ctx.send("❌ You do not have permission to run this command.")
 
     elif isinstance(error, commands.MissingRequiredArgument):
-        # Specific help prompt if they forgot the mandatory reason
-        await ctx.send(f"⚠ Missing arguments! Check your format: `,command <user/id> <reason>`")
+        await ctx.send(f"⚠ Missing arguments! Check your format.")
         
     elif isinstance(error, commands.CheckFailure):
-        # Handles cases where custom checks like `is_target_staff` fail quietly
         pass
 
 # =========================
 # BOT TOKEN
 # =========================
 
-# Good job protecting that environment variable! 😉
 bot.run(os.getenv('DISCORD_BOT_TOKEN'))
