@@ -16,6 +16,8 @@ intents.members = True
 bot = commands.Bot(command_prefix=",", intents=intents)
 
 STATS_FILE = "stats.json"
+JAIL_LOG_CHANNEL_NAME = "✎ᝰjail-logs"
+PUNISHMENT_LOG_CHANNEL_NAME = "✎ᝰmembers-punishment"
 
 def load_stats():
     """Loads stats and LOA data from the JSON file."""
@@ -300,6 +302,21 @@ async def warn(ctx, user: discord.User, *, reason: str):
 
     await ctx.send(embed=embed)
 
+    # Logging to "✎ᝰmembers-punishment"
+    log_channel = get(ctx.guild.text_channels, name=PUNISHMENT_LOG_CHANNEL_NAME)
+    if log_channel:
+        log_embed = discord.Embed(
+            title="⚠️ Warn Log Case Action",
+            description=f"**Target:** {user.mention} (`{user.id}`)\n**Moderator:** {ctx.author.mention}\n**Reason:** {reason}",
+            color=discord.Color.orange(),
+            timestamp=datetime.utcnow()
+        )
+        log_embed.set_thumbnail(url=user.display_avatar.url)
+        log_embed.set_footer(text="Case Action: Warn | Executed")
+        await log_channel.send(embed=log_embed)
+    else:
+        await ctx.send(f"⚠ Warning: Could not find log routing channel `#{PUNISHMENT_LOG_CHANNEL_NAME}`.")
+
 # =========================
 # MUTE COMMAND
 # =========================
@@ -334,6 +351,21 @@ async def mute(ctx, user: discord.User, *, reason: str):
 
     await ctx.send(embed=embed)
 
+    # Logging to "✎ᝰmembers-punishment"
+    log_channel = get(ctx.guild.text_channels, name=PUNISHMENT_LOG_CHANNEL_NAME)
+    if log_channel:
+        log_embed = discord.Embed(
+            title="🔇 Mute Log Case Action",
+            description=f"**Target:** {member.mention} (`{user.id}`)\n**Moderator:** {ctx.author.mention}\n**Reason:** {reason}",
+            color=discord.Color.red(),
+            timestamp=datetime.utcnow()
+        )
+        log_embed.set_thumbnail(url=member.display_avatar.url)
+        log_embed.set_footer(text="Case Action: Mute | Executed")
+        await log_channel.send(embed=log_embed)
+    else:
+        await ctx.send(f"⚠ Warning: Could not find log routing channel `#{PUNISHMENT_LOG_CHANNEL_NAME}`.")
+
 # =========================
 # UNMUTE COMMAND
 # =========================
@@ -363,6 +395,21 @@ async def unmute(ctx, user: discord.User, *, reason: str):
 
     await ctx.send(embed=embed)
 
+    # Logging to "✎ᝰmembers-punishment"
+    log_channel = get(ctx.guild.text_channels, name=PUNISHMENT_LOG_CHANNEL_NAME)
+    if log_channel:
+        log_embed = discord.Embed(
+            title="🔊 Unmute Log Case Action",
+            description=f"**Target:** {member.mention} (`{user.id}`)\n**Moderator:** {ctx.author.mention}\n**Reason for Unmute:** {reason}",
+            color=discord.Color.green(),
+            timestamp=datetime.utcnow()
+        )
+        log_embed.set_thumbnail(url=member.display_avatar.url)
+        log_embed.set_footer(text="Case Action: Unmute | Executed")
+        await log_channel.send(embed=log_embed)
+    else:
+        await ctx.send(f"⚠ Warning: Could not find log routing channel `#{PUNISHMENT_LOG_CHANNEL_NAME}`.")
+
 # =========================
 # JAIL COMMAND
 # =========================
@@ -379,7 +426,6 @@ async def jail(ctx, user: discord.User, *, reason: str):
 
     log_action(ctx.author.id, "jails")
     
-    # Strictly looks for the exact "⚠️Jailed" role layout now
     jailed_role = get(ctx.guild.roles, name="⚠️Jailed")
 
     if jailed_role is None:
@@ -394,12 +440,25 @@ async def jail(ctx, user: discord.User, *, reason: str):
         description=f"{member.mention} has been jailed.",
         color=discord.Color.dark_red()
     )
-
     embed.add_field(name="User ID", value=str(user.id), inline=False)
     embed.add_field(name="Reason", value=reason, inline=False)
     embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
 
     await ctx.send(embed=embed)
+
+    log_channel = get(ctx.guild.text_channels, name=JAIL_LOG_CHANNEL_NAME)
+    if log_channel:
+        log_embed = discord.Embed(
+            title="🔒 Jail Log Case Action",
+            description=f"**Target:** {member.mention} (`{user.id}`)\n**Moderator:** {ctx.author.mention}\n**Reason:** {reason}",
+            color=discord.Color.dark_red(),
+            timestamp=datetime.utcnow()
+        )
+        log_embed.set_thumbnail(url=member.display_avatar.url)
+        log_embed.set_footer(text="Case Action: Jail | Executed")
+        await log_channel.send(embed=log_embed)
+    else:
+        await ctx.send(f"⚠ Warning: Could not find log routing channel `#{JAIL_LOG_CHANNEL_NAME}`.")
 
 # =========================
 # UNJAIL COMMAND
@@ -425,12 +484,25 @@ async def unjail(ctx, user: discord.User, *, reason: str):
         description=f"{member.mention} has been released from jail.",
         color=discord.Color.green()
     )
-
     embed.add_field(name="User ID", value=str(user.id), inline=False)
     embed.add_field(name="Reason for Release", value=reason, inline=False)
     embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
 
     await ctx.send(embed=embed)
+
+    log_channel = get(ctx.guild.text_channels, name=JAIL_LOG_CHANNEL_NAME)
+    if log_channel:
+        log_embed = discord.Embed(
+            title="🔓 Unjail Log Case Action",
+            description=f"**Target:** {member.mention} (`{user.id}`)\n**Moderator:** {ctx.author.mention}\n**Reason for Release:** {reason}",
+            color=discord.Color.green(),
+            timestamp=datetime.utcnow()
+        )
+        log_embed.set_thumbnail(url=member.display_avatar.url)
+        log_embed.set_footer(text="Case Action: Unjail | Executed")
+        await log_channel.send(embed=log_embed)
+    else:
+        await ctx.send(f"⚠ Warning: Could not find log routing channel `#{JAIL_LOG_CHANNEL_NAME}`.")
 
 # =========================
 # CLEAR COMMAND
