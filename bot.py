@@ -86,11 +86,14 @@ def save_user_warning(user_id, mod_id, reason):
     data = load_stats()
     user_key = str(user_id)
     
+    if "user_warnings" not in data:
+        data["user_warnings"] = {}
+        
     if user_key not in data["user_warnings"]:
         data["user_warnings"][user_key] = []
         
     warning_entry = {
-        "mod_id": mod_id,
+        "mod_id": str(mod_id),
         "reason": reason,
         "date": datetime.utcnow().strftime("%Y-%m-%d %H:%M")
     }
@@ -165,11 +168,10 @@ def has_loa_permissions():
 class WarningManagementView(discord.ui.View):
     """Adds action buttons directly below the warning history layout."""
     def __init__(self, target_user: discord.User):
-        super().__init__(timeout=None)  # Keeps buttons active permanently or until bot reboot
+        super().__init__(timeout=None)
         self.target_user = target_user
 
     async def interaction_check(self, interaction: discord.Interaction) -> bool:
-        # Security Guard: Ensure clicking user belongs to the 🛡️Staff Team
         if any(role.name == "🛡️Staff Team" for role in interaction.user.roles):
             return True
         await interaction.response.send_message("❌ Only members of the Staff team can perform actions on infractions.", ephemeral=True)
@@ -185,14 +187,12 @@ class WarningManagementView(discord.ui.View):
             await interaction.response.send_message("❌ This user has no warning history to alter.", ephemeral=True)
             return
 
-        removed_entry = history.pop()  # Removes the last element added
+        removed_entry = history.pop()
         data["user_warnings"][user_key] = history
         save_stats(data)
 
-        # Update the initial embed on screen
         updated_embed = create_warnings_embed(self.target_user, history)
         
-        # Disable buttons entirely if record is now completely clean
         if not history:
             for child in self.children:
                 child.disabled = True
@@ -200,12 +200,11 @@ class WarningManagementView(discord.ui.View):
         await interaction.response.edit_message(embed=updated_embed, view=self)
         await interaction.followup.send(f"✅ Most recent warning for {self.target_user.mention} has been deleted.", ephemeral=True)
 
-        # Route audit details to logistics channel
         log_channel = get(interaction.guild.text_channels, name=PUNISHMENT_LOG_CHANNEL_NAME)
         if log_channel:
             log_embed = discord.Embed(
                 title="🗑️ Single Warning Revoked",
-                description=f"**Target:** {self.target_user.mention} (`{self.target_user.id}`)\n**Staff Executer:** {interaction.user.mention}\n**Removed Action Reason:** {removed_entry['reason']}",
+                description=f"**Target:** {self.target_user.mention} (`{self.target_user.id}`)\n**Staff Executor:** {interaction.user.mention}\n**Removed Action Reason:** {removed_entry['reason']}",
                 color=discord.Color.green(),
                 timestamp=datetime.utcnow()
             )
@@ -227,7 +226,6 @@ class WarningManagementView(discord.ui.View):
 
         updated_embed = create_warnings_embed(self.target_user, [])
         
-        # Wipe buttons out since no records remain
         for child in self.children:
             child.disabled = True
 
@@ -238,12 +236,11 @@ class WarningManagementView(discord.ui.View):
         if log_channel:
             log_embed = discord.Embed(
                 title="💥 Entire Warning File Wiped",
-                description=f"**Target:** {self.target_user.mention} (`{self.target_user.id}`)\n**Staff Executer:** {interaction.user.mention}\n**Action Details:** Wiped profile cleanly. (Purged `{total_cleared}` warnings)",
+                description=f"**Target:** {self.target_user.mention} (`{self.target_user.id}`)\n**Staff Executor:** {interaction.user.mention}\n**Action Details:** Wiped profile cleanly. (Purged `{total_cleared}` warnings)",
                 color=discord.Color.red(),
                 timestamp=datetime.utcnow()
             )
             await log_channel.send(embed=log_embed)
-
 
 def create_warnings_embed(user: discord.User, history: list) -> discord.Embed:
     """Helper method to draw the Infraction Embed uniformly."""
@@ -310,7 +307,6 @@ async def check_expired_loas():
     if changes_made:
         data["active_loas"] = updated_loas
         save_stats(data)
-
 
 @tasks.loop(minutes=1)
 async def check_expired_mutes():
@@ -493,7 +489,7 @@ async def warn(ctx, user: discord.User, *, reason: str):
         await ctx.send(f"⚠ Warning: Could not find log routing channel `#{PUNISHMENT_LOG_CHANNEL_NAME}`.")
 
 # =========================
-# CHECK WARNINGS COMMAND (WITH INTERACTIVE BUTTONS View)
+# CHECK WARNINGS COMMAND (WITH INTERACTIVE BUTTONS)
 # =========================
 
 @bot.command(name="warnings")
@@ -507,7 +503,6 @@ async def check_warnings(ctx, user: discord.User):
     embed = create_warnings_embed(user, history)
     view = WarningManagementView(user)
 
-    # If user record is clean from the start, grey out the interaction buttons
     if not history:
         for child in view.children:
             child.disabled = True
