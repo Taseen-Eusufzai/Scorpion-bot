@@ -370,5 +370,165 @@ async def jail(ctx, user_id: int, *, reason: str):
 
     if jailed_role is None:
         jailed_role = await ctx.guild.create_role(name="Jailed")
-        for
+        for channel in ctx.guild.channels:
+            await channel.set_permissions(
+                jailed_role,
+                send_messages=False,
+                speak=False
+            )
 
+    await member.add_roles(jailed_role)
+
+    embed = discord.Embed(
+        title="🚔 User Jailed",
+        description=f"{member.mention} has been jailed.",
+        color=discord.Color.dark_red()
+    )
+
+    embed.add_field(name="User ID", value=str(user_id), inline=False)
+    embed.add_field(name="Reason", value=reason, inline=False)
+    embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
+
+    await ctx.send(embed=embed)
+
+# =========================
+# UNJAIL COMMAND
+# =========================
+
+@bot.command()
+@commands.has_permissions(manage_roles=True)
+@is_target_staff()
+async def unjail(ctx, user_id: int, *, reason: str):
+
+    member = ctx.guild.get_member(user_id)
+
+    if member is None:
+        await ctx.send("❌ User not found in this server.")
+        return
+
+    jailed_role = get(ctx.guild.roles, name="Jailed")
+
+    if jailed_role in member.roles:
+        await member.remove_roles(jailed_role)
+
+    embed = discord.Embed(
+        title="✅ User Released",
+        description=f"{member.mention} has been released from jail.",
+        color=discord.Color.green()
+    )
+
+    embed.add_field(name="User ID", value=str(user_id), inline=False)
+    embed.add_field(name="Reason for Release", value=reason, inline=False)
+    embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
+
+    await ctx.send(embed=embed)
+
+# =========================
+# CLEAR COMMAND
+# =========================
+
+@bot.command()
+@commands.has_permissions(manage_messages=True)
+async def clear(ctx, amount: int):
+
+    if amount > 100:
+        await ctx.send("⚠ You can only delete up to 100 messages at a time.", delete_after=3)
+        return
+
+    await ctx.channel.purge(limit=amount + 1)
+
+    msg = await ctx.send(f"🧹 Cleared {amount} messages")
+    await msg.delete(delay=3)
+
+# =========================
+# LOA COMMAND (LEAVE OF ABSENCE)
+# =========================
+
+@bot.command()
+@has_loa_permissions() # Restricts access to your defined roles
+async def loa(ctx, duration: str, *, reason: str):
+    """Logs an absence, gives the role, and calculates automated expiry timing."""
+    
+    time_delta = parse_duration(duration)
+    if time_delta is None:
+        await ctx.send("❌ Invalid duration layout! Use values like `10m`, `3h`, `5d`, or `2w` (no spaces).")
+        return
+
+    loa_role = get(ctx.guild.roles, name="LOA")
+    if loa_role is None:
+        loa_role = await ctx.guild.create_role(name="LOA", reason="Automated LOA role creation")
+
+    if loa_role not in ctx.author.roles:
+        await ctx.author.add_roles(loa_role)
+
+    # Save expiry time to file data structure
+    expiry_time = datetime.utcnow() + time_delta
+    data = load_stats()
+    if "active_loas" not in data:
+        data["active_loas"] = {}
+        
+    data["active_loas"][str(ctx.author.id)] = expiry_time.strftime("%Y-%m-%d %H:%M:%S")
+    save_stats(data)
+
+    embed = discord.Embed(
+        title="📅 Leave of Absence Logged",
+        description=f"Staff member {ctx.author.mention} is now on LOA.",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Duration", value=duration, inline=True)
+    embed.add_field(name="Expires Around (UTC)", value=expiry_time.strftime("%Y-%m-%d %H:%M"), inline=True)
+    embed.add_field(name="Reason", value=reason, inline=False)
+    embed.set_footer(text=f"Logged via Management Approval System")
+
+    await ctx.send(embed=embed)
+
+# =========================
+# RETURN COMMAND
+# =========================
+
+@bot.command(name="return")
+async def return_staff(ctx):
+    """Allows staff to end their LOA early manually."""
+    loa_role = get(ctx.guild.roles, name="LOA")
+    
+    if loa_role is None or loa_role not in ctx.author.roles:
+        await ctx.send("❌ You don't currently have an active LOA role status!", delete_after=3)
+        return
+
+    await ctx.author.remove_roles(loa_role)
+
+    # Wipe them clean from the auto-expire database list
+    data = load_stats()
+    if "active_loas" in data and str(ctx.author.id) in data["active_loas"]:
+        del data["active_loas"][str(ctx.author.id)]
+        save_stats(data)
+
+    embed = discord.Embed(
+        title="👋 Welcome Back!",
+        description=f"{ctx.author.mention} has manually returned to active duty. LOA file index cleared.",
+        color=discord.Color.green()
+    )
+    
+    await ctx.send(embed=embed)
+
+# =========================
+# ERROR HANDLER
+# =========================
+
+@bot.event
+async def on_command_error(ctx, error):
+
+    if isinstance(error, commands.MissingPermissions):
+        await ctx.send("❌ You do not have permission to run this command.")
+
+    elif isinstance(error, commands.MissingRequiredArgument):
+        await ctx.send(f"⚠ Missing arguments! Check your format structure.")
+        
+    elif isinstance(error, commands.CheckFailure):
+        pass
+
+# =========================
+# BOT RUN CONFIGURATION
+# =========================
+
+bot.run(os.getenv('DISCORD_TOKEN'))
