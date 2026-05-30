@@ -106,10 +106,12 @@ def is_target_staff():
     async def predicate(ctx):
         args = ctx.message.content.split()
         if len(args) > 1:
-            converter = commands.MemberConverter()
+            # Handles both IDs and Mentions safely in the pre-check
+            converter = commands.UserConverter()
             try:
-                member = await converter.convert(ctx, args[1])
-                if any(role.name == "🛡️Staff Team" for role in member.roles):
+                user = await converter.convert(ctx, args[1])
+                member = ctx.guild.get_member(user.id)
+                if member and any(role.name == "🛡️Staff Team" for role in member.roles):
                     await ctx.send("❌ You cannot punish a member of the Staff team!")
                     return False
             except commands.BadArgument:
@@ -208,8 +210,8 @@ async def ping(ctx):
 
 @bot.command()
 @is_staff()
-async def ms(ctx, member: discord.Member = None):
-    target = member or ctx.author
+async def ms(ctx, user: discord.User = None):
+    target = user or ctx.author
     data = load_stats()
     stats = data.get("mods", {})
     mod_key = str(target.id)
@@ -266,15 +268,15 @@ async def ms(ctx, member: discord.Member = None):
 async def helpme(ctx):
     embed = discord.Embed(
         title="🦂 Scorpion Bot Commands",
-        description="**Developer:** Kaizen\n**Prefix:** `,`\n\n*Note: All moderation commands require a reason and cannot target staff members.*",
+        description="**Developer:** Kaizen\n**Prefix:** `,`\n\n*Note: All moderation/management commands accept @User or UserID inputs.*",
         color=discord.Color.red()
     )
 
-    embed.add_field(name="⚙ Utility", value="`,ping` • Show bot ping\n`,ms [@staff]` • View moderator metrics (Staff Only)", inline=False)
-    embed.add_field(name="🛡 Moderation", value="`,warn @user <reason>` • Warn a member\n`,mute @user <reason>` • Mute a member\n`,unmute @user <reason>` • Unmute a member", inline=False)
-    embed.add_field(name="🚔 Deep Freeze", value="`,jail USER_ID <reason>` • Jail user via ID\n`,unjail USER_ID <reason>` • Unjail user via ID", inline=False)
+    embed.add_field(name="⚙ Utility", value="`,ping` • Show bot ping\n`,ms [@staff/ID]` • View moderator metrics (Staff Only)", inline=False)
+    embed.add_field(name="🛡 Moderation", value="`,warn [@user/ID] <reason>` • Warn a member\n`,mute [@user/ID] <reason>` • Mute a member\n`,unmute [@user/ID] <reason>` • Unmute a member", inline=False)
+    embed.add_field(name="🚔 Deep Freeze", value="`,jail [@user/ID] <reason>` • Jail user\n`,unjail [@user/ID] <reason>` • Unjail user", inline=False)
     embed.add_field(name="🧹 Chat Management", value="`,clear <amount>` • Delete messages (Max 100)", inline=False)
-    embed.add_field(name="📅 Staff Logistics", value="`,loa @user <duration> <reason>` • Log absence for a user (Elite Roles Only)\n`,return [@user]` • Remove LOA status from a user", inline=False)
+    embed.add_field(name="📅 Staff Logistics", value="`,loa [@user/ID] <duration> <reason>` • Log absence (Elite Roles Only)\n`,return [@user/ID]` • Remove LOA status from a user", inline=False)
 
     await ctx.send(embed=embed)
 
@@ -285,13 +287,13 @@ async def helpme(ctx):
 @bot.command()
 @commands.has_permissions(manage_messages=True)
 @is_target_staff()
-async def warn(ctx, member: discord.Member, *, reason: str):
+async def warn(ctx, user: discord.User, *, reason: str):
     
     log_action(ctx.author.id, "warns")
 
     embed = discord.Embed(
         title="⚠ Warning",
-        description=f"{member.mention} has been warned.",
+        description=f"{user.mention} has been warned.",
         color=discord.Color.orange()
     )
     embed.add_field(name="Reason", value=reason, inline=False)
@@ -306,20 +308,20 @@ async def warn(ctx, member: discord.Member, *, reason: str):
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 @is_target_staff()
-async def mute(ctx, member: discord.Member, *, reason: str):
+async def mute(ctx, user: discord.User, *, reason: str):
+
+    member = ctx.guild.get_member(user.id)
+    if member is None:
+        await ctx.send("❌ This user is not currently in this server.")
+        return
 
     log_action(ctx.author.id, "mutes")
-
     muted_role = get(ctx.guild.roles, name="Muted")
 
     if muted_role is None:
         muted_role = await ctx.guild.create_role(name="Muted")
         for channel in ctx.guild.channels:
-            await channel.set_permissions(
-                muted_role,
-                send_messages=False,
-                speak=False
-            )
+            await channel.set_permissions(muted_role, send_messages=False, speak=False)
 
     await member.add_roles(muted_role)
 
@@ -340,7 +342,12 @@ async def mute(ctx, member: discord.Member, *, reason: str):
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 @is_target_staff()
-async def unmute(ctx, member: discord.Member, *, reason: str):
+async def unmute(ctx, user: discord.User, *, reason: str):
+
+    member = ctx.guild.get_member(user.id)
+    if member is None:
+        await ctx.send("❌ This user is not currently in this server.")
+        return
 
     muted_role = get(ctx.guild.roles, name="Muted")
 
@@ -364,30 +371,20 @@ async def unmute(ctx, member: discord.Member, *, reason: str):
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 @is_target_staff()
-async def jail(ctx, user_id: int, *, reason: str):
+async def jail(ctx, user: discord.User, *, reason: str):
 
-    member = ctx.guild.get_member(user_id)
-
+    member = ctx.guild.get_member(user.id)
     if member is None:
         await ctx.send("❌ User not found in this server.")
         return
 
-    if any(role.name == "🛡️Staff Team" for role in member.roles):
-        await ctx.send("❌ You cannot punish a member of the Staff team!")
-        return
-
     log_action(ctx.author.id, "jails")
-
     jailed_role = get(ctx.guild.roles, name="Jailed")
 
     if jailed_role is None:
         jailed_role = await ctx.guild.create_role(name="Jailed")
         for channel in ctx.guild.channels:
-            await channel.set_permissions(
-                jailed_role,
-                send_messages=False,
-                speak=False
-            )
+            await channel.set_permissions(jailed_role, send_messages=False, speak=False)
 
     await member.add_roles(jailed_role)
 
@@ -397,7 +394,7 @@ async def jail(ctx, user_id: int, *, reason: str):
         color=discord.Color.dark_red()
     )
 
-    embed.add_field(name="User ID", value=str(user_id), inline=False)
+    embed.add_field(name="User ID", value=str(user.id), inline=False)
     embed.add_field(name="Reason", value=reason, inline=False)
     embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
 
@@ -410,10 +407,9 @@ async def jail(ctx, user_id: int, *, reason: str):
 @bot.command()
 @commands.has_permissions(manage_roles=True)
 @is_target_staff()
-async def unjail(ctx, user_id: int, *, reason: str):
+async def unjail(ctx, user: discord.User, *, reason: str):
 
-    member = ctx.guild.get_member(user_id)
-
+    member = ctx.guild.get_member(user.id)
     if member is None:
         await ctx.send("❌ User not found in this server.")
         return
@@ -429,7 +425,7 @@ async def unjail(ctx, user_id: int, *, reason: str):
         color=discord.Color.green()
     )
 
-    embed.add_field(name="User ID", value=str(user_id), inline=False)
+    embed.add_field(name="User ID", value=str(user.id), inline=False)
     embed.add_field(name="Reason for Release", value=reason, inline=False)
     embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
 
@@ -458,31 +454,33 @@ async def clear(ctx, amount: int):
 
 @bot.command()
 @has_loa_permissions()
-async def loa(ctx, member: discord.Member, duration: str, *, reason: str):
-    """Logs an absence for a target user, gives the role, and automates expiry calculations."""
+async def loa(ctx, user: discord.User, duration: str, *, reason: str):
+    """Logs an absence for a target user via ID or tag, handles roles, and automates tracking."""
     
     time_delta = parse_duration(duration)
     if time_delta is None:
         await ctx.send("❌ Invalid duration layout! Use values like `10m`, `3h`, `5d`, or `2w` (no spaces).")
         return
 
-    loa_role = get(ctx.guild.roles, name="LOA")
-    if loa_role is None:
-        loa_role = await ctx.guild.create_role(name="LOA", reason="Automated LOA role creation")
+    # Check if they are actually in the guild right now to apply the role
+    member = ctx.guild.get_member(user.id)
+    if member:
+        loa_role = get(ctx.guild.roles, name="LOA")
+        if loa_role is None:
+            loa_role = await ctx.guild.create_role(name="LOA", reason="Automated LOA role creation")
 
-    if loa_role not in member.roles:
-        await member.add_roles(loa_role)
+        if loa_role not in member.roles:
+            await member.add_roles(loa_role)
 
     expiry_time = datetime.utcnow() + time_delta
     data = load_stats()
         
-    # Saves data referencing the targeted user's ID
-    data["active_loas"][str(member.id)] = expiry_time.strftime("%Y-%m-%d %H:%M:%S")
+    data["active_loas"][str(user.id)] = expiry_time.strftime("%Y-%m-%d %H:%M:%S")
     save_stats(data)
 
     embed = discord.Embed(
         title="📅 Leave of Absence Logged",
-        description=f"Staff member {member.mention} is now on LOA.",
+        description=f"Staff member {user.mention} is now on LOA.",
         color=discord.Color.blue()
     )
     embed.add_field(name="Duration", value=duration, inline=True)
@@ -498,25 +496,24 @@ async def loa(ctx, member: discord.Member, duration: str, *, reason: str):
 
 @bot.command(name="return")
 @has_loa_permissions()
-async def return_staff(ctx, member: discord.Member = None):
-    """Allows higher staff to end an LOA for someone early (defaults to author)."""
-    target = member or ctx.author
-    loa_role = get(ctx.guild.roles, name="LOA")
+async def return_staff(ctx, user: discord.User = None):
+    """Allows higher staff to end an LOA for someone early via ID or tag (defaults to author)."""
+    target_user = user or ctx.author
+    member = ctx.guild.get_member(target_user.id)
     
-    if loa_role is None or loa_role not in target.roles:
-        await ctx.send(f"❌ {target.mention} does not currently have an active LOA role status!", delete_after=3)
-        return
-
-    await target.remove_roles(loa_role)
+    if member:
+        loa_role = get(ctx.guild.roles, name="LOA")
+        if loa_role and loa_role in member.roles:
+            await member.remove_roles(loa_role)
 
     data = load_stats()
-    if str(target.id) in data["active_loas"]:
-        del data["active_loas"][str(target.id)]
+    if str(target_user.id) in data["active_loas"]:
+        del data["active_loas"][str(target_user.id)]
         save_stats(data)
 
     embed = discord.Embed(
         title="👋 LOA Terminated Early",
-        description=f"{target.mention}'s LOA has been resolved. Returning to active duty status.",
+        description=f"{target_user.mention}'s LOA has been resolved. Returning to active duty status.",
         color=discord.Color.green()
     )
     
@@ -533,7 +530,10 @@ async def on_command_error(ctx, error):
         await ctx.send("❌ You do not have permission to run this command.")
 
     elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"⚠ Missing arguments! Syntax structure layout:\n`,loa @User [duration] [reason]`")
+        await ctx.send(f"⚠ Missing arguments! Check your command layout formatting.")
+        
+    elif isinstance(error, commands.UserNotFound):
+        await ctx.send("❌ Could not find that user. Make sure the ID or Tag is correct.")
         
     elif isinstance(error, commands.CheckFailure):
         pass
