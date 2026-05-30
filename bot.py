@@ -132,7 +132,7 @@ def has_loa_permissions():
         allowed_roles = ["Management", "Administrator", "Head Administrator", "Owner", "Co-Owner"]
         if any(role.name in allowed_roles for role in ctx.author.roles):
             return True
-        await ctx.send("❌ You do not hold an authorized hierarchy role to submit an LOA.")
+        await ctx.send("❌ You do not hold an authorized hierarchy role to manage an LOA.")
         return False
     return commands.check(predicate)
 
@@ -207,7 +207,7 @@ async def ping(ctx):
 # =========================
 
 @bot.command()
-@is_staff() # Now strictly requires the "🛡️Staff Team" role
+@is_staff()
 async def ms(ctx, member: discord.Member = None):
     target = member or ctx.author
     data = load_stats()
@@ -232,7 +232,7 @@ async def ms(ctx, member: discord.Member = None):
         title="Moderation Statistics",
         color=discord.Color.from_rgb(47, 49, 54)
     )
-    embed.set_author(name=target.display_name, icon_url=target.display_avatar.url)
+    embed.set_author(name=target.name, icon_url=target.display_avatar.url)
 
     embed.add_field(
         name="Warns",
@@ -254,7 +254,7 @@ async def ms(ctx, member: discord.Member = None):
         value=f"Daily: {daily_total}\nWeekly: {weekly_total}\nMonthly: {monthly_total}\nAll-time: {all_time_total}",
         inline=False
     )
-    embed.set_footer(text=f"Built by Kaizen | Today at {datetime.utcnow().strftime('%H:%M')}")
+    embed.set_footer(text=f"Built by Kaizen | Powered by Aura ✨ • Today at {datetime.utcnow().strftime('%H:%M')}")
 
     await ctx.send(embed=embed)
 
@@ -274,7 +274,7 @@ async def helpme(ctx):
     embed.add_field(name="🛡 Moderation", value="`,warn @user <reason>` • Warn a member\n`,mute @user <reason>` • Mute a member\n`,unmute @user <reason>` • Unmute a member", inline=False)
     embed.add_field(name="🚔 Deep Freeze", value="`,jail USER_ID <reason>` • Jail user via ID\n`,unjail USER_ID <reason>` • Unjail user via ID", inline=False)
     embed.add_field(name="🧹 Chat Management", value="`,clear <amount>` • Delete messages (Max 100)", inline=False)
-    embed.add_field(name="📅 Staff Logistics", value="`,loa <duration> <reason>` • Log absence (Elite Roles Only)\n`,return` • End LOA manually", inline=False)
+    embed.add_field(name="📅 Staff Logistics", value="`,loa @user <duration> <reason>` • Log absence for a user (Elite Roles Only)\n`,return [@user]` • Remove LOA status from a user", inline=False)
 
     await ctx.send(embed=embed)
 
@@ -458,8 +458,8 @@ async def clear(ctx, amount: int):
 
 @bot.command()
 @has_loa_permissions()
-async def loa(ctx, duration: str, *, reason: str):
-    """Logs an absence, gives the role, and calculates automated expiry timing."""
+async def loa(ctx, member: discord.Member, duration: str, *, reason: str):
+    """Logs an absence for a target user, gives the role, and automates expiry calculations."""
     
     time_delta = parse_duration(duration)
     if time_delta is None:
@@ -470,24 +470,25 @@ async def loa(ctx, duration: str, *, reason: str):
     if loa_role is None:
         loa_role = await ctx.guild.create_role(name="LOA", reason="Automated LOA role creation")
 
-    if loa_role not in ctx.author.roles:
-        await ctx.author.add_roles(loa_role)
+    if loa_role not in member.roles:
+        await member.add_roles(loa_role)
 
     expiry_time = datetime.utcnow() + time_delta
     data = load_stats()
         
-    data["active_loas"][str(ctx.author.id)] = expiry_time.strftime("%Y-%m-%d %H:%M:%S")
+    # Saves data referencing the targeted user's ID
+    data["active_loas"][str(member.id)] = expiry_time.strftime("%Y-%m-%d %H:%M:%S")
     save_stats(data)
 
     embed = discord.Embed(
         title="📅 Leave of Absence Logged",
-        description=f"Staff member {ctx.author.mention} is now on LOA.",
+        description=f"Staff member {member.mention} is now on LOA.",
         color=discord.Color.blue()
     )
     embed.add_field(name="Duration", value=duration, inline=True)
     embed.add_field(name="Expires Around (UTC)", value=expiry_time.strftime("%Y-%m-%d %H:%M"), inline=True)
     embed.add_field(name="Reason", value=reason, inline=False)
-    embed.set_footer(text=f"Logged via Management Approval System")
+    embed.set_footer(text=f"Logged by {ctx.author.name} | Management System")
 
     await ctx.send(embed=embed)
 
@@ -496,24 +497,26 @@ async def loa(ctx, duration: str, *, reason: str):
 # =========================
 
 @bot.command(name="return")
-async def return_staff(ctx):
-    """Allows staff to end their LOA early manually."""
+@has_loa_permissions()
+async def return_staff(ctx, member: discord.Member = None):
+    """Allows higher staff to end an LOA for someone early (defaults to author)."""
+    target = member or ctx.author
     loa_role = get(ctx.guild.roles, name="LOA")
     
-    if loa_role is None or loa_role not in ctx.author.roles:
-        await ctx.send("❌ You don't currently have an active LOA role status!", delete_after=3)
+    if loa_role is None or loa_role not in target.roles:
+        await ctx.send(f"❌ {target.mention} does not currently have an active LOA role status!", delete_after=3)
         return
 
-    await ctx.author.remove_roles(loa_role)
+    await target.remove_roles(loa_role)
 
     data = load_stats()
-    if str(ctx.author.id) in data["active_loas"]:
-        del data["active_loas"][str(ctx.author.id)]
+    if str(target.id) in data["active_loas"]:
+        del data["active_loas"][str(target.id)]
         save_stats(data)
 
     embed = discord.Embed(
-        title="👋 Welcome Back!",
-        description=f"{ctx.author.mention} has manually returned to active duty. LOA file index cleared.",
+        title="👋 LOA Terminated Early",
+        description=f"{target.mention}'s LOA has been resolved. Returning to active duty status.",
         color=discord.Color.green()
     )
     
@@ -530,7 +533,7 @@ async def on_command_error(ctx, error):
         await ctx.send("❌ You do not have permission to run this command.")
 
     elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"⚠ Missing arguments! Check your format structure.")
+        await ctx.send(f"⚠ Missing arguments! Syntax structure layout:\n`,loa @User [duration] [reason]`")
         
     elif isinstance(error, commands.CheckFailure):
         pass
