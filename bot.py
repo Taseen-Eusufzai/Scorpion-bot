@@ -1,9 +1,9 @@
 import os
 import json
 import discord
-from discord.ext import commands
+from discord.ext import commands, tasks
 from discord.utils import get
-from datetime import datetime
+from datetime import datetime, timedelta
 
 # =========================
 # BOT SETUP & DATA STORAGE
@@ -18,27 +18,30 @@ bot = commands.Bot(command_prefix=",", intents=intents)
 STATS_FILE = "stats.json"
 
 def load_stats():
-    """Loads stats from the JSON file or creates a empty structure if it doesn't exist."""
+    """Loads stats and LOA data from the JSON file."""
     if os.path.exists(STATS_FILE):
         try:
             with open(STATS_FILE, "r") as f:
                 return json.load(f)
         except:
-            return {}
-    return {}
+            return {"mods": {}, "active_loas": {}}
+    return {"mods": {}, "active_loas": {}}
 
 def save_stats(data):
-    """Saves the tracking data back to the JSON file."""
+    """Saves tracking and LOA data back to the JSON file."""
     with open(STATS_FILE, "w") as f:
         json.dump(data, f, indent=4)
 
 def log_action(mod_id, action_type):
     """Increments daily, weekly, monthly, and total logs for a specific mod."""
-    stats = load_stats()
+    data = load_stats()
+    if "mods" not in data:
+        data["mods"] = {}
+        
+    stats = data["mods"]
     mod_key = str(mod_id)
     current_date = datetime.utcnow()
     
-    # Structure data if the mod is new
     if mod_key not in stats:
         stats[mod_key] = {
             "warns": {"daily": 0, "weekly": 0, "monthly": 0, "total": 0},
@@ -51,19 +54,16 @@ def log_action(mod_id, action_type):
     last_update_str = mod_data.get("last_update", current_date.strftime("%Y-%m-%d"))
     last_update = datetime.strptime(last_update_str, "%Y-%m-%d")
 
-    # Time differences to handle automatic resets
     days_diff = (current_date - last_update).days
     is_new_day = days_diff >= 1
     is_new_week = current_date.strftime("%V") != last_update.strftime("%V") or days_diff >= 7
     is_new_month = current_date.month != last_update.month or days_diff >= 30
 
-    # Reset periods if time has passed
     for cat in ["warns", "mutes", "jails"]:
         if is_new_day: mod_data[cat]["daily"] = 0
         if is_new_week: mod_data[cat]["weekly"] = 0
         if is_new_month: mod_data[cat]["monthly"] = 0
 
-    # Add the current log action
     if action_type in ["warns", "mutes", "jails"]:
         mod_data[action_type]["daily"] += 1
         mod_data[action_type]["weekly"] += 1
@@ -71,10 +71,30 @@ def log_action(mod_id, action_type):
         mod_data[action_type]["total"] += 1
 
     mod_data["last_update"] = current_date.strftime("%Y-%m-%d")
-    save_stats(stats)
+    save_stats(data)
+
+def parse_duration(duration_str):
+    """Parses time strings like 1m, 2h, 3d, 1w into a timedelta object."""
+    try:
+        amount = int(''.join(filter(str.isdigit, duration_str)))
+        unit = ''.join(filter(str.isalpha, duration_str)).lower()
+        
+        if 'm' in unit and 'o' not in unit:  # minutes
+            return timedelta(minutes=amount)
+        elif 'h' in unit:  # hours
+            return timedelta(hours=amount)
+        elif 'd' in unit:  # days
+            return timedelta(days=amount)
+        elif 'w' in unit:  # weeks
+            return timedelta(weeks=amount)
+        elif 'mo' in unit:  # months (approx 30 days)
+            return timedelta(days=amount * 30)
+    except:
+        return None
+    return None
 
 # =========================
-# HELPER CHECK (STAFF BYPASS PROTECTION)
+# HELPER CHECKS
 # =========================
 
 def is_target_staff():
@@ -93,6 +113,62 @@ def is_target_staff():
         return True
     return commands.check(predicate)
 
+def has_loa_permissions():
+    """Restricts LOA command usage to specifically defined high staff roles."""
+    async def predicate(ctx):
+        allowed_roles = ["Management", "Administrator", "Head Administrator", "Owner", "Co-Owner"]
+        if any(role.name in allowed_roles for role in ctx.author.roles):
+            return True
+        await ctx.send("❌ You do not hold an authorized hierarchy role to submit an LOA.")
+        return False
+    return commands.check(predicate)
+
+# =========================
+# BACKGROUND LOA EXPIRATION TRACKER
+# =========================
+
+@tasks.loop(minutes=1)
+async def check_expired_loas():
+    """Background loop running every minute checking for ended leaves."""
+    await bot.wait_until_ready()
+    data = load_stats()
+    
+    if "active_loas" not in data or not data["active_loas"]:
+        return
+
+    current_time = datetime.utcnow()
+    updated_loas = data["active_loas"].copy()
+    changes_made = False
+
+    for user_id_str, expiry_time_str in data["active_loas"].items():
+        expiry_time = datetime.strptime(expiry_time_str, "%Y-%m-%d %H:%M:%S")
+        
+        if current_time >= expiry_time:
+            # Time has passed! Let's clean up
+            for guild in bot.guilds:
+                member = guild.get_member(int(user_id_str))
+                if member:
+                    loa_role = get(guild.roles, name="LOA")
+                    if loa_role and loa_role in member.roles:
+                        try:
+                            await member.remove_roles(loa_role)
+                            # Try to send them a DM alerting them
+                            embed = discord.Embed(
+                                title="📅 LOA Expired",
+                                description=f"Your Leave of Absence duration in **{guild.name}** has concluded. Your LOA role has been removed automatically.",
+                                color=discord.Color.orange()
+                            )
+                            await member.send(embed=embed)
+                        except:
+                            pass
+            
+            del updated_loas[user_id_str]
+            changes_made = True
+
+    if changes_made:
+        data["active_loas"] = updated_loas
+        save_stats(data)
+
 # =========================
 # READY EVENT
 # =========================
@@ -103,6 +179,9 @@ async def on_ready():
     await bot.change_presence(
         activity=discord.Game(name="Scorpion Bot | Made by Kaizen")
     )
+    # Starts the auto-time background loop
+    if not check_expired_loas.is_running():
+        check_expired_loas.start()
 
 # =========================
 # PING COMMAND
@@ -118,13 +197,12 @@ async def ping(ctx):
 
 @bot.command()
 async def ms(ctx, member: discord.Member = None):
-    """Displays moderation action metrics for a specific staff member or yourself."""
     target = member or ctx.author
-    stats = load_stats()
+    data = load_stats()
+    stats = data.get("mods", {})
     mod_key = str(target.id)
 
     if mod_key not in stats:
-        # Default empty display structure
         mod_data = {
             "warns": {"daily": 0, "weekly": 0, "monthly": 0, "total": 0},
             "mutes": {"daily": 0, "weekly": 0, "monthly": 0, "total": 0},
@@ -133,7 +211,6 @@ async def ms(ctx, member: discord.Member = None):
     else:
         mod_data = stats[mod_key]
 
-    # Calculate Total Actions Accumulations
     daily_total = mod_data["warns"]["daily"] + mod_data["mutes"]["daily"] + mod_data["jails"]["daily"]
     weekly_total = mod_data["warns"]["weekly"] + mod_data["mutes"]["weekly"] + mod_data["jails"]["weekly"]
     monthly_total = mod_data["warns"]["monthly"] + mod_data["mutes"]["monthly"] + mod_data["jails"]["monthly"]
@@ -141,7 +218,7 @@ async def ms(ctx, member: discord.Member = None):
 
     embed = discord.Embed(
         title="Moderation Statistics",
-        color=discord.Color.from_rgb(47, 49, 54) # Sleek Dark Discord theme palette
+        color=discord.Color.from_rgb(47, 49, 54)
     )
     embed.set_author(name=target.display_name, icon_url=target.display_avatar.url)
 
@@ -185,7 +262,7 @@ async def helpme(ctx):
     embed.add_field(name="🛡 Moderation", value="`,warn @user <reason>` • Warn a member\n`,mute @user <reason>` • Mute a member\n`,unmute @user <reason>` • Unmute a member", inline=False)
     embed.add_field(name="🚔 Deep Freeze", value="`,jail USER_ID <reason>` • Jail user via ID\n`,unjail USER_ID <reason>` • Unjail user via ID", inline=False)
     embed.add_field(name="🧹 Chat Management", value="`,clear <amount>` • Delete messages (Max 100)", inline=False)
-    embed.add_field(name="📅 Staff Logistics", value="`,loa <duration> <reason>` • Log absence & get LOA role\n`,return` • Remove LOA role & return to duty", inline=False)
+    embed.add_field(name="📅 Staff Logistics", value="`,loa <duration> <reason>` • Log absence (Elite Roles Only)\n`,return` • End LOA manually", inline=False)
 
     await ctx.send(embed=embed)
 
@@ -198,7 +275,7 @@ async def helpme(ctx):
 @is_target_staff()
 async def warn(ctx, member: discord.Member, *, reason: str):
     
-    log_action(ctx.author.id, "warns") # Tracker trigger
+    log_action(ctx.author.id, "warns")
 
     embed = discord.Embed(
         title="⚠ Warning",
@@ -219,7 +296,7 @@ async def warn(ctx, member: discord.Member, *, reason: str):
 @is_target_staff()
 async def mute(ctx, member: discord.Member, *, reason: str):
 
-    log_action(ctx.author.id, "mutes") # Tracker trigger
+    log_action(ctx.author.id, "mutes")
 
     muted_role = get(ctx.guild.roles, name="Muted")
 
@@ -287,149 +364,11 @@ async def jail(ctx, user_id: int, *, reason: str):
         await ctx.send("❌ You cannot punish a member of the Staff team!")
         return
 
-    log_action(ctx.author.id, "jails") # Tracker trigger
+    log_action(ctx.author.id, "jails")
 
     jailed_role = get(ctx.guild.roles, name="Jailed")
 
     if jailed_role is None:
         jailed_role = await ctx.guild.create_role(name="Jailed")
-        for channel in ctx.guild.channels:
-            await channel.set_permissions(
-                jailed_role,
-                send_messages=False,
-                speak=False
-            )
-
-    await member.add_roles(jailed_role)
-
-    embed = discord.Embed(
-        title="🚔 User Jailed",
-        description=f"{member.mention} has been jailed.",
-        color=discord.Color.dark_red()
-    )
-
-    embed.add_field(name="User ID", value=str(user_id), inline=False)
-    embed.add_field(name="Reason", value=reason, inline=False)
-    embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
-
-    await ctx.send(embed=embed)
-
-# =========================
-# UNJAIL COMMAND
-# =========================
-
-@bot.command()
-@commands.has_permissions(manage_roles=True)
-@is_target_staff()
-async def unjail(ctx, user_id: int, *, reason: str):
-
-    member = ctx.guild.get_member(user_id)
-
-    if member is None:
-        await ctx.send("❌ User not found in this server.")
-        return
-
-    jailed_role = get(ctx.guild.roles, name="Jailed")
-
-    if jailed_role in member.roles:
-        await member.remove_roles(jailed_role)
-
-    embed = discord.Embed(
-        title="✅ User Released",
-        description=f"{member.mention} has been released from jail.",
-        color=discord.Color.green()
-    )
-
-    embed.add_field(name="User ID", value=str(user_id), inline=False)
-    embed.add_field(name="Reason for Release", value=reason, inline=False)
-    embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
-
-    await ctx.send(embed=embed)
-
-# =========================
-# CLEAR COMMAND
-# =========================
-
-@bot.command()
-@commands.has_permissions(manage_messages=True)
-async def clear(ctx, amount: int):
-
-    if amount > 100:
-        await ctx.send("⚠ You can only delete up to 100 messages at a time.", delete_after=3)
-        return
-
-    await ctx.channel.purge(limit=amount + 1)
-
-    msg = await ctx.send(f"🧹 Cleared {amount} messages")
-    await msg.delete(delay=3)
-
-# =========================
-# LOA COMMAND (LEAVE OF ABSENCE)
-# =========================
-
-@bot.command()
-async def loa(ctx, duration: str, *, reason: str):
-    
-    loa_role = get(ctx.guild.roles, name="LOA")
-    if loa_role is None:
-        loa_role = await ctx.guild.create_role(name="LOA", reason="Automated LOA role creation")
-
-    if loa_role not in ctx.author.roles:
-        await ctx.author.add_roles(loa_role)
-
-    embed = discord.Embed(
-        title="📅 Leave of Absence Logged",
-        description=f"Staff member {ctx.author.mention} is now on LOA.",
-        color=discord.Color.blue()
-    )
-    embed.add_field(name="Duration", value=duration, inline=True)
-    embed.add_field(name="Reason", value=reason, inline=False)
-    embed.set_footer(text=f"Logged on {ctx.message.created_at.strftime('%Y-%m-%d')}")
-
-    await ctx.send(embed=embed)
-
-# =========================
-# RETURN COMMAND
-# =========================
-
-@bot.command(name="return")
-async def return_staff(ctx):
-    
-    loa_role = get(ctx.guild.roles, name="LOA")
-    
-    if loa_role is None or loa_role not in ctx.author.roles:
-        await ctx.send("❌ You don't currently have the LOA role!", delete_after=3)
-        return
-
-    await ctx.author.remove_roles(loa_role)
-
-    embed = discord.Embed(
-        title="👋 Welcome Back!",
-        description=f"{ctx.author.mention} has returned from their Leave of Absence and their LOA role has been removed.",
-        color=discord.Color.green()
-    )
-    
-    await ctx.send(embed=embed)
-
-# =========================
-# ERROR HANDLER
-# =========================
-
-@bot.event
-async def on_command_error(ctx, error):
-
-    if isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ You do not have permission to run this command.")
-
-    elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"⚠ Missing arguments! Check your format.")
-        
-    elif isinstance(error, commands.CheckFailure):
-        pass
-
-# =========================
-# BOT TOKEN
-# =========================
-
-bot.run(os.getenv('DISCORD_TOKEN'))
+        for
 
