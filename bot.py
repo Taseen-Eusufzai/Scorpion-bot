@@ -1,5 +1,5 @@
-import discord
 import os
+import discord
 from discord.ext import commands
 from discord.utils import get
 
@@ -14,24 +14,50 @@ intents.members = True
 bot = commands.Bot(command_prefix=",", intents=intents)
 
 # =========================
+# HELPER CHECK (STAFF BYPASS PROTECTION)
+# =========================
+
+def is_target_staff():
+    """Custom check to ensure the target member does not have the 'Staff' role."""
+    async def predicate(ctx):
+        # We look at the first argument after the command to find the target member
+        args = ctx.message.content.split()
+        if len(args) > 1:
+            # Try to find the member by mention or ID
+            converter = commands.MemberConverter()
+            try:
+                member = await converter.convert(ctx, args[1])
+                if any(role.name == "Staff" for role in member.roles):
+                    await ctx.send("❌ You cannot punish a member of the Staff team!")
+                    return False
+            except commands.BadArgument:
+                pass
+        return True
+    return commands.check(predicate)
+
+# =========================
 # READY EVENT
 # =========================
 
 @bot.event
 async def on_ready():
     print(f"{bot.user} is online!")
-
     await bot.change_presence(
         activity=discord.Game(name="Scorpion Bot | Made by Kaizen")
     )
 
 # =========================
-# PING COMMAND
+# PING / MS COMMANDS
 # =========================
 
 @bot.command()
 async def ping(ctx):
     await ctx.send(f"🏓 Pong! {round(bot.latency * 1000)}ms")
+
+@bot.command()
+async def ms(ctx):
+    """Alternative fast latency command."""
+    await ctx.send(f"⚡ Connection Speed: `{round(bot.latency * 1000)}ms`")
 
 # =========================
 # HELP COMMAND
@@ -39,20 +65,20 @@ async def ping(ctx):
 
 @bot.command()
 async def helpme(ctx):
-
     embed = discord.Embed(
         title="🦂 Scorpion Bot Commands",
         description="This bot is made by Kaizen",
         color=discord.Color.red()
     )
 
-    embed.add_field(name=",ping", value="Show bot ping", inline=False)
-    embed.add_field(name=",warn @user reason", value="Warn a member", inline=False)
-    embed.add_field(name=",mute @user", value="Mute a member", inline=False)
-    embed.add_field(name=",unmute @user", value="Unmute a member", inline=False)
-    embed.add_field(name=",jail USER_ID", value="Jail user using ID only", inline=False)
-    embed.add_field(name=",unjail USER_ID", value="Unjail user using ID only", inline=False)
-    embed.add_field(name=",clear amount", value="Delete messages", inline=False)
+    embed.add_field(name=",ping / ,ms", value="Show bot ping and latency", inline=False)
+    embed.add_field(name=",warn @user <reason>", value="Warn a member (Reason required)", inline=False)
+    embed.add_field(name=",mute @user <reason>", value="Mute a member (Reason required)", inline=False)
+    embed.add_field(name=",unmute @user <reason>", value="Unmute a member (Reason required)", inline=False)
+    embed.add_field(name=",jail USER_ID <reason>", value="Jail user using ID only (Reason required)", inline=False)
+    embed.add_field(name=",unjail USER_ID <reason>", value="Unjail user using ID only (Reason required)", inline=False)
+    embed.add_field(name=",clear amount", value="Delete messages (Max 100)", inline=False)
+    embed.add_field(name=",loa <duration> <reason>", value="Log a staff Leave of Absence", inline=False)
 
     await ctx.send(embed=embed)
 
@@ -62,7 +88,8 @@ async def helpme(ctx):
 
 @bot.command()
 @commands.has_permissions(manage_messages=True)
-async def warn(ctx, member: discord.Member, *, reason="No reason"):
+@is_target_staff()
+async def warn(ctx, member: discord.Member, *, reason: str): # Removing default string makes it mandatory
 
     embed = discord.Embed(
         title="⚠ Warning",
@@ -70,8 +97,8 @@ async def warn(ctx, member: discord.Member, *, reason="No reason"):
         color=discord.Color.orange()
     )
 
-    embed.add_field(name="Reason", value=reason)
-    embed.add_field(name="Moderator", value=ctx.author.mention)
+    embed.add_field(name="Reason", value=reason, inline=False)
+    embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
 
     await ctx.send(embed=embed)
 
@@ -81,14 +108,13 @@ async def warn(ctx, member: discord.Member, *, reason="No reason"):
 
 @bot.command()
 @commands.has_permissions(manage_roles=True)
-async def mute(ctx, member: discord.Member):
+@is_target_staff()
+async def mute(ctx, member: discord.Member, *, reason: str):
 
     muted_role = get(ctx.guild.roles, name="Muted")
 
     if muted_role is None:
-
         muted_role = await ctx.guild.create_role(name="Muted")
-
         for channel in ctx.guild.channels:
             await channel.set_permissions(
                 muted_role,
@@ -103,6 +129,8 @@ async def mute(ctx, member: discord.Member):
         description=f"{member.mention} has been muted.",
         color=discord.Color.red()
     )
+    embed.add_field(name="Reason", value=reason, inline=False)
+    embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
 
     await ctx.send(embed=embed)
 
@@ -112,7 +140,8 @@ async def mute(ctx, member: discord.Member):
 
 @bot.command()
 @commands.has_permissions(manage_roles=True)
-async def unmute(ctx, member: discord.Member):
+@is_target_staff()
+async def unmute(ctx, member: discord.Member, *, reason: str):
 
     muted_role = get(ctx.guild.roles, name="Muted")
 
@@ -124,13 +153,19 @@ async def unmute(ctx, member: discord.Member):
         description=f"{member.mention} has been unmuted.",
         color=discord.Color.green()
     )
+    embed.add_field(name="Reason for Unmute", value=reason, inline=False)
+    embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
 
     await ctx.send(embed=embed)
 
 # =========================
+# JAIL COMMAND
+# =========================
+
 @bot.command()
 @commands.has_permissions(manage_roles=True)
-async def jail(ctx, user_id: int, *, reason="No reason provided"):
+@is_target_staff()
+async def jail(ctx, user_id: int, *, reason: str):
 
     member = ctx.guild.get_member(user_id)
 
@@ -138,11 +173,15 @@ async def jail(ctx, user_id: int, *, reason="No reason provided"):
         await ctx.send("❌ User not found in this server.")
         return
 
-    jailed_role = get(ctx.guild.roles, name="⚠️Jailed")
+    # Check for staff manually here since ID is evaluated inside the command logic
+    if any(role.name == "Staff" for role in member.roles):
+        await ctx.send("❌ You cannot punish a member of the Staff team!")
+        return
+
+    jailed_role = get(ctx.guild.roles, name="Jailed")
 
     if jailed_role is None:
         jailed_role = await ctx.guild.create_role(name="Jailed")
-
         for channel in ctx.guild.channels:
             await channel.set_permissions(
                 jailed_role,
@@ -160,17 +199,18 @@ async def jail(ctx, user_id: int, *, reason="No reason provided"):
 
     embed.add_field(name="User ID", value=str(user_id), inline=False)
     embed.add_field(name="Reason", value=reason, inline=False)
+    embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
 
     await ctx.send(embed=embed)
 
-
 # =========================
-# UNJAIL COMMAND (USER ID ONLY)
+# UNJAIL COMMAND
 # =========================
 
 @bot.command()
 @commands.has_permissions(manage_roles=True)
-async def unjail(ctx, user_id: int):
+@is_target_staff()
+async def unjail(ctx, user_id: int, *, reason: str):
 
     member = ctx.guild.get_member(user_id)
 
@@ -190,6 +230,8 @@ async def unjail(ctx, user_id: int):
     )
 
     embed.add_field(name="User ID", value=str(user_id), inline=False)
+    embed.add_field(name="Reason for Release", value=reason, inline=False)
+    embed.add_field(name="Moderator", value=ctx.author.mention, inline=False)
 
     await ctx.send(embed=embed)
 
@@ -201,10 +243,33 @@ async def unjail(ctx, user_id: int):
 @commands.has_permissions(manage_messages=True)
 async def clear(ctx, amount: int):
 
+    # Cap the amount at 100
+    if amount > 100:
+        await ctx.send("⚠ You can only delete up to 100 messages at a time.", delete_after=3)
+        return
+
     await ctx.channel.purge(limit=amount + 1)
 
     msg = await ctx.send(f"🧹 Cleared {amount} messages")
     await msg.delete(delay=3)
+
+# =========================
+# LOA COMMAND (LEAVE OF ABSENCE)
+# =========================
+
+@bot.command()
+async def loa(ctx, duration: str, *, reason: str):
+    """Allows staff to request or state their Leave of Absence."""
+    embed = discord.Embed(
+        title="📅 Leave of Absence Logged",
+        description=f"Staff member {ctx.author.mention} has requested an LOA.",
+        color=discord.Color.blue()
+    )
+    embed.add_field(name="Duration", value=duration, inline=True)
+    embed.add_field(name="Reason", value=reason, inline=False)
+    embed.set_footer(text=f"Logged on {ctx.message.created_at.strftime('%Y-%m-%d')}")
+
+    await ctx.send(embed=embed)
 
 # =========================
 # ERROR HANDLER
@@ -214,13 +279,19 @@ async def clear(ctx, amount: int):
 async def on_command_error(ctx, error):
 
     if isinstance(error, commands.MissingPermissions):
-        await ctx.send("❌ You do not have permission.")
+        await ctx.send("❌ You do not have permission to run this command.")
 
     elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send("⚠ Missing arguments.")
+        # Specific help prompt if they forgot the mandatory reason
+        await ctx.send(f"⚠ Missing arguments! Check your format: `,command <user/id> <reason>`")
+        
+    elif isinstance(error, commands.CheckFailure):
+        # Handles cases where custom checks like `is_target_staff` fail quietly
+        pass
 
 # =========================
 # BOT TOKEN
 # =========================
 
-bot.run(os.getenv("DISCORD_TOKEN"))
+# Good job protecting that environment variable! 😉
+bot.run(os.getenv('DISCORD_BOT_TOKEN'))
