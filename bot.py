@@ -431,5 +431,5 @@ async def on_command_error(ctx, error):
 # BOT TOKEN
 # =========================
 
-bot.run(os.getenv('DISCORD_BOT_TOKEN'))
+bot.run(os.getenv('DISCORD_TOKEN'))
 
