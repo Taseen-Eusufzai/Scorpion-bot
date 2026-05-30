@@ -102,14 +102,14 @@ def parse_duration(duration_str):
 # =========================
 
 def is_target_staff():
-    """Custom check to ensure the target member does not have the 'Staff' role."""
+    """Custom check to ensure the target member does not have the '🛡️Staff Team' role."""
     async def predicate(ctx):
         args = ctx.message.content.split()
         if len(args) > 1:
             converter = commands.MemberConverter()
             try:
                 member = await converter.convert(ctx, args[1])
-                if any(role.name == "Staff" for role in member.roles):
+                if any(role.name == "🛡️Staff Team" for role in member.roles):
                     await ctx.send("❌ You cannot punish a member of the Staff team!")
                     return False
             except commands.BadArgument:
@@ -118,9 +118,9 @@ def is_target_staff():
     return commands.check(predicate)
 
 def is_staff():
-    """Custom check to ensure only members with the 'Staff' role can view stats."""
+    """Custom check to ensure only members with the '🛡️Staff Team' role can view stats."""
     async def predicate(ctx):
-        if any(role.name == "Staff" for role in ctx.author.roles):
+        if any(role.name == "🛡️Staff Team" for role in ctx.author.roles):
             return True
         await ctx.send("❌ Only members of the Staff team can view moderation statistics.")
         return False
@@ -207,7 +207,7 @@ async def ping(ctx):
 # =========================
 
 @bot.command()
-@is_staff() # Restricts access to the Staff Team role
+@is_staff() # Now strictly requires the "🛡️Staff Team" role
 async def ms(ctx, member: discord.Member = None):
     target = member or ctx.author
     data = load_stats()
@@ -372,7 +372,7 @@ async def jail(ctx, user_id: int, *, reason: str):
         await ctx.send("❌ User not found in this server.")
         return
 
-    if any(role.name == "Staff" for role in member.roles):
+    if any(role.name == "🛡️Staff Team" for role in member.roles):
         await ctx.send("❌ You cannot punish a member of the Staff team!")
         return
 
