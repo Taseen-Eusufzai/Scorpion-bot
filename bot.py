@@ -128,6 +128,27 @@ def parse_duration(duration_str):
 # HELPER CHECKS
 # =========================
 
+# Custom CheckFailure subclasses — carry their own user-facing message so the
+# error handler is the single place that sends the response, preventing any
+# possibility of a check predicate AND the error handler both sending a message.
+
+class NotStaffError(commands.CheckFailure):
+    def __init__(self):
+        super().__init__("❌ Only members of the Staff team can access this layout.")
+
+class TargetIsStaffError(commands.CheckFailure):
+    def __init__(self):
+        super().__init__("❌ You cannot punish a member of the Staff team!")
+
+class MissingLOAPermissionError(commands.CheckFailure):
+    def __init__(self):
+        super().__init__("❌ You do not hold an authorized hierarchy role to manage an LOA.")
+
+class MissingSnipePermissionError(commands.CheckFailure):
+    def __init__(self):
+        super().__init__("❌ You do not have the required role hierarchy to clear logs.")
+
+
 def is_target_staff():
     """Custom check to ensure the target member does not have the '🛡️Staff Team' role."""
     async def predicate(ctx):
@@ -138,8 +159,7 @@ def is_target_staff():
                 user = await converter.convert(ctx, args[1])
                 member = ctx.guild.get_member(user.id)
                 if member and any(role.name == "🛡️Staff Team" for role in member.roles):
-                    await ctx.send("❌ You cannot punish a member of the Staff team!")
-                    return False
+                    raise TargetIsStaffError()
             except commands.BadArgument:
                 pass
         return True
@@ -150,8 +170,7 @@ def is_staff():
     async def predicate(ctx):
         if any(role.name == "🛡️Staff Team" for role in ctx.author.roles):
             return True
-        await ctx.send("❌ Only members of the Staff team can access this layout.")
-        return False
+        raise NotStaffError()
     return commands.check(predicate)
 
 def has_loa_permissions():
@@ -160,8 +179,7 @@ def has_loa_permissions():
         allowed_roles = ["Management", "Administrator", "Head Administrator", "Owner", "Co-Owner"]
         if any(role.name in allowed_roles for role in ctx.author.roles):
             return True
-        await ctx.send("❌ You do not hold an authorized hierarchy role to manage an LOA.")
-        return False
+        raise MissingLOAPermissionError()
     return commands.check(predicate)
 
 def has_clear_snipe_permissions():
@@ -170,8 +188,7 @@ def has_clear_snipe_permissions():
         allowed_roles = ["Administrator", "Co-Owner", "Owner"]
         if any(role.name in allowed_roles for role in ctx.author.roles):
             return True
-        await ctx.send("❌ You do not have the required role hierarchy to clear logs.")
-        return False
+        raise MissingSnipePermissionError()
     return commands.check(predicate)
 
 # =========================
@@ -660,7 +677,6 @@ async def mute(ctx, user: discord.User, duration: str, *, reason: str):
 
 @bot.command()
 @is_staff()
-@is_target_staff()
 async def unmute(ctx, user: discord.User, *, reason: str):
 
     member = ctx.guild.get_member(user.id)
@@ -672,6 +688,8 @@ async def unmute(ctx, user: discord.User, *, reason: str):
 
     if muted_role in member.roles:
         await member.remove_roles(muted_role)
+
+
 
     data = load_stats()
     if str(user.id) in data["active_mutes"]:
@@ -758,7 +776,6 @@ async def jail(ctx, user: discord.User, *, reason: str):
 
 @bot.command()
 @is_staff()
-@is_target_staff()
 async def unjail(ctx, user: discord.User, *, reason: str):
 
     member = ctx.guild.get_member(user.id)
@@ -796,7 +813,7 @@ async def unjail(ctx, user: discord.User, *, reason: str):
     else:
         await ctx.send(f"⚠ Warning: Could not find log routing channel `#{JAIL_LOG_CHANNEL_NAME}`.")
 
-# =========================
+
 # CLEAR COMMAND
 # =========================
 
@@ -889,17 +906,25 @@ async def return_staff(ctx, user: discord.User = None):
 
 @bot.event
 async def on_command_error(ctx, error):
+    # Unwrap errors that are wrapped by the command framework
+    error = getattr(error, "original", error)
 
     if isinstance(error, commands.MissingPermissions):
         await ctx.send("❌ You do not have permission to run this command.")
 
     elif isinstance(error, commands.MissingRequiredArgument):
-        await ctx.send(f"⚠ Missing arguments! Check your command layout formatting.")
-        
+        await ctx.send("⚠ Missing arguments! Check your command layout formatting.")
+
     elif isinstance(error, commands.UserNotFound):
         await ctx.send("❌ Could not find that user. Make sure the ID or Tag is correct.")
-        
+
+    elif isinstance(error, (NotStaffError, TargetIsStaffError,
+                            MissingLOAPermissionError, MissingSnipePermissionError)):
+        # Send the message embedded in the custom exception exactly once.
+        await ctx.send(str(error))
+
     elif isinstance(error, commands.CheckFailure):
+        # Generic check failure with no specific message — silently ignore.
         pass
 
 # =========================
